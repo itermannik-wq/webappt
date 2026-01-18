@@ -527,6 +527,16 @@
       -webkit-tap-highlight-color: transparent;
     }
     .chip:active{ transform: scale(.98); }
+    .chip.ok{
+      color: rgba(16,185,129,.95);
+      border-color: rgba(16,185,129,.35);
+      background: rgba(16,185,129,.12);
+    }
+    .chip.bad{
+      color: rgba(239,68,68,.95);
+      border-color: rgba(239,68,68,.35);
+      background: rgba(239,68,68,.12);
+    }
 
     .stickyActions{
       position: fixed;
@@ -748,6 +758,69 @@
               <div class="spacer8"></div>
               <div class="tiny muted2">ПСДПМ</div>
               <div id="mPSDPM" class="bold mono" style="margin-top:4px;">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Аналитика года</h3>
+          <span id="yearMeta" class="tiny muted2">—</span>
+        </div>
+
+        <div class="grid2">
+          <div class="card metric">
+            <div class="label">Доход года (YTD)</div>
+            <div id="yIncome" class="value mono">—</div>
+            <div class="sub">Σ пожертвования</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Расход года (YTD)</div>
+            <div id="yExpenses" class="value mono">—</div>
+            <div class="sub">Σ расходов</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Баланс года (YTD)</div>
+            <div id="yBalance" class="value mono">—</div>
+            <div class="sub">доход − расход</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Рост к прошлому году</div>
+            <div id="yYoY" class="value mono">—</div>
+            <div class="sub">по доходу</div>
+          </div>
+        </div>
+
+        <div class="card bigCard" style="margin-top:12px;">
+          <div class="rowBetween">
+            <div class="small muted">Динамика доходов и расходов</div>
+            <div class="tiny muted2">по месяцам</div>
+          </div>
+          <div class="chartWrap">
+            <canvas id="yearLine"></canvas>
+          </div>
+        </div>
+
+        <div class="card bigCard" style="margin-top:12px;">
+          <div class="rowBetween">
+            <div class="small muted">Баланс по месяцам</div>
+            <div class="tiny muted2">профицит/дефицит</div>
+          </div>
+          <div class="chartWrap">
+            <canvas id="yearBalanceBar"></canvas>
+          </div>
+        </div>
+
+        <div class="card bigCard" style="margin-top:12px;">
+          <div class="grid2">
+            <div>
+              <div class="small muted">Хорошие месяцы</div>
+              <div id="goodMonths" class="chips"></div>
+            </div>
+            <div>
+              <div class="small muted">Плохие месяцы</div>
+              <div id="badMonths" class="chips"></div>
             </div>
           </div>
         </div>
@@ -1159,6 +1232,11 @@
       const x = Number(n);
       return x.toLocaleString("ru-RU", {minimumFractionDigits: 2, maximumFractionDigits: 2});
     };
+    const fmtPercent = (v, digits=1) => {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+      const pct = Number(v) * 100;
+      return `${pct.toFixed(digits)}%`;
+    };
     const fmtShortDate = (iso) => {
       try {
         const d = new Date(iso + "T00:00:00");
@@ -1170,6 +1248,12 @@
         const d = new Date(iso + "T00:00:00");
         return d.toLocaleDateString("ru-RU", {day:"2-digit", month:"2-digit", year:"numeric"});
       } catch { return iso; }
+    };
+    const toIsoDateLocal = (dateObj) => {
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, "0");
+      const d = String(dateObj.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
     };
     const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
     const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
@@ -1308,6 +1392,7 @@
       summary: null,
       services: [],
       expenses: [],
+      yearAnalytics: null,
 
       sundayDates: [],
       sundayIndex: 0,
@@ -1315,6 +1400,8 @@
       charts: {
         sundayBar: null,
         expensePie: null,
+        yearLine: null,
+        yearBalanceBar: null,
       },
 
       historyMode: "don", // don|exp
@@ -1381,14 +1468,14 @@
     }
 
     function computeSundays(y, m){
-      // JS Date: month 0..11
+      // JS Date: month 0..11␊
       const sundays = [];
       const first = new Date(y, m-1, 1);
       const last = new Date(y, m, 0);
       for(let day=1; day<=last.getDate(); day++){
         const d = new Date(y, m-1, day);
-        if (d.getDay() === 0) { // Sunday 0
-          sundays.push(d.toISOString().slice(0,10));
+        if (d.getDay() === 0) { // Sunday 0␊
+          sundays.push(toIsoDateLocal(d));
         }
       }
       return sundays;
@@ -1407,6 +1494,11 @@
         State.monthCache.set(keyYM(item.year, item.month), item);
       }
       rebuildHistoryMonthSelect();
+    }
+
+    async function loadYearAnalytics(){
+      const data = await API.get(`/api/analytics/year?year=${encodeURIComponent(State.year)}`);
+      State.yearAnalytics = data;
     }
 
     async function ensureSelectedMonthExists(){
@@ -1445,9 +1537,11 @@
      * Data loading
      **********************/
     async function refreshAll(){
+      await loadYearAnalytics();
       if (!State.monthId) {
         // clear UI
         renderEmptyMonth();
+        renderYearAnalytics();
         return;
       }
       const [summary, services, expenses] = await Promise.all([
@@ -1465,10 +1559,6 @@
       State.categories = Array.from(cats).sort((a,b)=>a.localeCompare(b,"ru"));
       rebuildCategories();
 
-      // sundays
-      State.sundayDates = computeSundays(State.year, State.month);
-      // default to last sunday <= today or first
-      State.sundayIndex = clamp(findDefaultSundayIndex(), 0, Math.max(0, State.sundayDates.length-1));
       updateDonationDateUI();
 
       renderDashboard();
@@ -1478,7 +1568,7 @@
 
     function findDefaultSundayIndex(){
       const today = new Date();
-      const todayISO = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString().slice(0,10);
+      const todayISO = toIsoDateLocal(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
       const idx = State.sundayDates.findLastIndex ? State.sundayDates.findLastIndex(d=>d<=todayISO) : (() => {
         let last = -1;
         for (let i=0;i<State.sundayDates.length;i++) if (State.sundayDates[i] <= todayISO) last = i;
@@ -1509,8 +1599,12 @@
     function destroyCharts(){
       try { State.charts.sundayBar?.destroy(); } catch {}
       try { State.charts.expensePie?.destroy(); } catch {}
+      try { State.charts.yearLine?.destroy(); } catch {}
+      try { State.charts.yearBalanceBar?.destroy(); } catch {}
       State.charts.sundayBar = null;
       State.charts.expensePie = null;
+      State.charts.yearLine = null;
+      State.charts.yearBalanceBar = null;
     }
 
     /**********************
@@ -1518,6 +1612,7 @@
      **********************/
     function renderDashboard(){
       const s = State.summary;
+      renderYearAnalytics();
       if (!s) return;
 
       $("#mIncome").textContent = fmtMoney(s.month_income_sum);
@@ -1560,6 +1655,168 @@
       renderExpensePie();
       renderLastExpenses();
       updateAddButtonsByRole();
+    }
+
+    function renderYearAnalytics(){
+      const ya = State.yearAnalytics;
+      if (!ya || !ya.totals || !ya.months) {
+        renderYearEmpty();
+        return;
+      }
+
+      const totals = ya.totals;
+      const monthCount = totals.months_count || 0;
+
+      $("#yearMeta").textContent = `Год ${ya.year} • месяцев: ${monthCount} из 12 • сравнение с ${ya.prev_year?.year ?? "—"}`;
+      $("#yIncome").textContent = fmtMoney(totals.income);
+      $("#yExpenses").textContent = fmtMoney(totals.expenses);
+      $("#yBalance").textContent = fmtMoney(totals.balance);
+      $("#yYoY").textContent = fmtPercent(ya.yoy?.income, 1);
+
+      renderYearChips(ya.good_months || [], ya.bad_months || []);
+      renderYearCharts(ya.months || []);
+    }
+
+    function renderYearEmpty(){
+      $("#yearMeta").textContent = "—";
+      $("#yIncome").textContent = "—";
+      $("#yExpenses").textContent = "—";
+      $("#yBalance").textContent = "—";
+      $("#yYoY").textContent = "—";
+      $("#goodMonths").innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      $("#badMonths").innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      try { State.charts.yearLine?.destroy(); } catch {}
+      try { State.charts.yearBalanceBar?.destroy(); } catch {}
+      State.charts.yearLine = null;
+      State.charts.yearBalanceBar = null;
+    }
+
+    function renderYearChips(good, bad){
+      const goodWrap = $("#goodMonths");
+      const badWrap = $("#badMonths");
+      goodWrap.innerHTML = "";
+      badWrap.innerHTML = "";
+
+      if (!good.length) {
+        goodWrap.innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      } else {
+        good.forEach((m)=>{
+          const chip = document.createElement("div");
+          chip.className = "chip ok";
+          chip.textContent = `${monthNameRu(m.month)} • ${fmtPercent(m.completion, 0)}`;
+          goodWrap.appendChild(chip);
+        });
+      }
+
+      if (!bad.length) {
+        badWrap.innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      } else {
+        bad.forEach((m)=>{
+          const chip = document.createElement("div");
+          chip.className = "chip bad";
+          chip.textContent = `${monthNameRu(m.month)} • ${fmtPercent(m.completion, 0)}`;
+          badWrap.appendChild(chip);
+        });
+      }
+    }
+
+    function renderYearCharts(months){
+      const labels = months.map((m)=> monthNameRu(m.month).slice(0,3));
+      const incomes = months.map((m)=> m.has_data ? Number(m.income || 0) : null);
+      const expenses = months.map((m)=> m.has_data ? Number(m.expenses || 0) : null);
+      const balances = months.map((m)=> m.has_data ? Number(m.balance || 0) : null);
+
+      const styles = getComputedStyle(document.documentElement);
+      const accent = styles.getPropertyValue("--accent").trim() || "#10b981";
+      const danger = styles.getPropertyValue("--danger").trim() || "#ef4444";
+      const muted = styles.getPropertyValue("--muted").trim();
+      const stroke = styles.getPropertyValue("--stroke").trim();
+
+      try { State.charts.yearLine?.destroy(); } catch {}
+      const lineCtx = $("#yearLine").getContext("2d");
+      State.charts.yearLine = new Chart(lineCtx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Доход",
+              data: incomes,
+              borderColor: accent,
+              backgroundColor: "rgba(16,185,129,.15)",
+              borderWidth: 2,
+              tension: 0.35,
+              spanGaps: true,
+            },
+            {
+              label: "Расход",
+              data: expenses,
+              borderColor: danger,
+              backgroundColor: "rgba(239,68,68,.15)",
+              borderWidth: 2,
+              tension: 0.35,
+              spanGaps: true,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 700 },
+          plugins: {
+            legend: {
+              display: true,
+              position: "bottom",
+              labels: { color: muted, boxWidth: 10, boxHeight: 10, padding: 12 }
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx)=> ` ${ctx.dataset.label}: ${fmtMoney(ctx.raw)}`
+              }
+            }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: muted } },
+            y: { beginAtZero: true, grid: { color: stroke }, ticks: { color: muted } }
+          }
+        }
+      });
+
+      const balanceColors = balances.map((v)=> (v ?? 0) >= 0 ? "rgba(16,185,129,.6)" : "rgba(239,68,68,.6)");
+      try { State.charts.yearBalanceBar?.destroy(); } catch {}
+      const barCtx = $("#yearBalanceBar").getContext("2d");
+      State.charts.yearBalanceBar = new Chart(barCtx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Баланс",
+              data: balances,
+              borderRadius: 10,
+              borderWidth: 0,
+              backgroundColor: balanceColors
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 700 },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx)=> ` ${fmtMoney(ctx.raw)}`
+              }
+            }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: muted } },
+            y: { grid: { color: stroke }, ticks: { color: muted } }
+          }
+        }
+      });
     }
 
     function updateAddButtonsByRole(){
@@ -1928,7 +2185,7 @@
      **********************/
     function setExpenseToday(){
       const d = new Date();
-      const iso = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0,10);
+      const iso = toIsoDateLocal(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
       $("#expDate").value = iso;
     }
 
@@ -2164,9 +2421,9 @@
         return;
       }
 
-      // expense duplicate: create new expense with same fields + today date
+      // expense duplicate: create new expense with same fields + today date␊
       const d = new Date();
-      const todayIso = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0,10);
+      const todayIso = toIsoDateLocal(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
       const body = {
         expense_date: todayIso,
         category: Edit.item.category || "Прочее",
@@ -2628,4 +2885,3 @@
   </script>
 </body>
 </html>
-
