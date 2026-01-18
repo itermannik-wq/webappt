@@ -196,8 +196,19 @@
       min-width: 0;
     }
     .collectionBody{
-      padding: 0 12px 12px;
+      padding: 0 12px;
       border-top: 1px solid var(--stroke);
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(-6px);
+      overflow: hidden;
+      transition: max-height .28s ease, opacity .2s ease, transform .2s ease, padding .2s ease;
+    }
+    .collectionCard.expanded .collectionBody{
+      padding: 0 12px 12px;
+      max-height: 2200px;
+      opacity: 1;
+      transform: translateY(0);
     }
     .collectionChevron{
       color: var(--muted);
@@ -812,7 +823,7 @@
             </div>
             <span class="icon collectionChevron">expand_more</span>
           </button>
-          <div id="yearCollectionBody" class="collectionBody hidden">
+          <div id="yearCollectionBody" class="collectionBody">
             <div class="grid2">
               <div class="card metric">
                 <div class="label">Доход года (YTD)</div>
@@ -1731,7 +1742,7 @@
       $("#yYoY").textContent = fmtPercent(ya.yoy?.income, 1);
 
       renderYearChips(ya.good_months || [], ya.bad_months || []);
-      const isExpanded = !$("#yearCollectionBody").classList.contains("hidden");
+      const isExpanded = $("#yearCollection").classList.contains("expanded");
       if (isExpanded) {
         renderYearCharts(ya.months || []);
       } else {
@@ -2293,10 +2304,8 @@
 
     function setYearCollectionExpanded(expanded){
       const card = $("#yearCollection");
-      const body = $("#yearCollectionBody");
       const toggle = $("#yearCollectionToggle");
       card.classList.toggle("expanded", expanded);
-      body.classList.toggle("hidden", !expanded);
       toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
       if (expanded) renderYearAnalytics();
     }
@@ -2958,9 +2967,20 @@
 
       // initial render settings UI (lazy)
       renderSettingsUI();
+
+      const initialScreen = new URLSearchParams(window.location.search).get("screen");
+      if (["dashboard","add","history","settings"].includes(initialScreen)){
+        if (initialScreen === "settings" && State.role === "viewer"){
+          setToast("Нет доступа");
+        } else {
+          switchScreen(initialScreen);
+          if (initialScreen === "add") setAddTab("don");
+        }
+      }
     }
 
     boot().catch(e=> alert(String(e.message||e)));
   </script>
 </body>
 </html>
+
