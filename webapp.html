@@ -544,6 +544,10 @@
       gap: 8px;
       pointer-events: auto;
     }
+    #addDonationWrap,
+    #addExpenseWrap{
+      padding-bottom: calc(var(--nav-h) + var(--safe-bot) + 140px);
+    }
 
     /* Modal */
     .modalBackdrop{
@@ -567,6 +571,9 @@
       overflow:hidden;
       transform: translateY(10px);
       animation: sheetUp .20s ease forwards;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bot));
     }
     @keyframes sheetUp{ to{ transform: translateY(0); } }
     .modalHeader{
@@ -582,8 +589,9 @@
     }
     .modalBody{
       padding: 14px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
-
     /* Success overlay */
     .toast{
       position: fixed;
@@ -2620,3 +2628,4 @@
   </script>
 </body>
 </html>
+
