@@ -962,15 +962,26 @@ def reports_kb() -> InlineKeyboardMarkup:
         ]
     )
 
+    def webapp_url_with_screen(screen: str) -> str:
+        url = CFG.WEBAPP_URL
+        try:
+            parsed = urllib.parse.urlparse(url)
+            query = urllib.parse.parse_qs(parsed.query)
+            query["screen"] = [screen]
+            new_query = urllib.parse.urlencode(query, doseq=True)
+            return urllib.parse.urlunparse(parsed._replace(query=new_query))
+        except Exception:
+            sep = "&" if "?" in url else "?"
+            return f"{url}{sep}screen={screen}"
 
-def parse_quick_input(text: str) -> Optional[Dict[str, Any]]:
-    """
-    Форматы из ТЗ:
-      "пож 8500 4800"   -> cashless=8500, cash=4800
-      "расход 2500 зал" -> unit_amount=2500, category="зал", title="зал"
-    """
-    t = text.strip()
-    low = t.lower()
+    def parse_quick_input(text: str) -> Optional[Dict[str, Any]]:
+        """
+        Форматы из ТЗ:
+          "пож 8500 4800"   -> cashless=8500, cash=4800
+          "расход 2500 зал" -> unit_amount=2500, category="зал", title="зал"
+        """
+        t = text.strip()
+        low = t.lower()
 
     if low.startswith("пож"):
         parts = t.split()
@@ -1108,18 +1119,43 @@ async def on_reports_menu(cq: CallbackQuery):
     if not is_allowed_telegram_user(tid):
         await cq.answer("Нет доступа", show_alert=True)
         return
-    await cq.message.answer("Отчёты:", reply_markup=reports_kb())
-    await cq.answer()
+        await cq.message.answer("Отчёты:", reply_markup=reports_kb())
+        await cq.answer()
 
+    @router.callback_query(F.data.startswith("menu:settings"))
+    async def on_settings_menu(cq: CallbackQuery):
+        if not cq.from_user:
+            return
+        tid = cq.from_user.id
+        if not is_allowed_telegram_user(tid):
+            await cq.answer("Нет доступа", show_alert=True)
+            return
 
-@router.callback_query(F.data.startswith("report:"))
-async def on_report_actions(cq: CallbackQuery):
-    if not cq.from_user:
-        return
-    tid = cq.from_user.id
-    if not is_allowed_telegram_user(tid):
-        await cq.answer("Нет доступа", show_alert=True)
-        return
+        role = get_user_role_from_db(tid)
+        if role != "admin":
+            await cq.answer("Нет доступа", show_alert=True)
+            return
+
+        await cq.message.answer(
+            "Настройки:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Открыть настройки (WebApp)",
+                                          web_app=WebAppInfo(url=webapp_url_with_screen("settings")))]
+                ]
+            ),
+        )
+        await cq.answer()
+
+    @router.callback_query(F.data.startswith("report:"))
+    async def on_report_actions(cq: CallbackQuery):
+        if not cq.from_user:
+            return
+        tid = cq.from_user.id
+        if not is_allowed_telegram_user(tid):
+            await cq.answer("Нет доступа", show_alert=True)
+            return
+
 
     role = get_user_role_from_db(tid)
     if role not in ("admin", "accountant", "viewer"):
@@ -2174,5 +2210,3 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
-
-
