@@ -652,6 +652,140 @@ def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str,
         "avg_sunday": round(avg_sunday, 2),
     }
 
+    def compute_year_analytics(year: int) -> Dict[str, Any]:
+        months = db_fetchall("SELECT * FROM months WHERE year=? ORDER BY month ASC;", (year,))
+        month_map = {int(m["month"]): m for m in months}
+
+        month_items: List[Dict[str, Any]] = []
+        totals = {
+            "income": 0.0,
+            "expenses": 0.0,
+            "balance": 0.0,
+            "min_needed": 0.0,
+            "months_count": 0,
+        }
+        good_months: List[Dict[str, Any]] = []
+        bad_months: List[Dict[str, Any]] = []
+
+        for m in range(1, 13):
+            row = month_map.get(m)
+            if not row:
+                month_items.append(
+                    {
+                        "month": m,
+                        "has_data": False,
+                        "income": 0.0,
+                        "expenses": 0.0,
+                        "balance": 0.0,
+                        "min_needed": 0.0,
+                        "completion": 0.0,
+                    }
+                )
+                continue
+
+            summary = compute_month_summary(int(row["id"]), ensure_tithe=True)
+            income = float(summary["month_income_sum"])
+            expenses = float(summary["month_expenses_sum"])
+            balance = float(summary["month_balance"])
+            min_needed = float(summary["monthly_min_needed"])
+            completion = float(summary["monthly_completion"])
+
+            totals["income"] += income
+            totals["expenses"] += expenses
+            totals["balance"] += balance
+            totals["min_needed"] += min_needed
+            totals["months_count"] += 1
+
+            is_good = (min_needed > 0 and income >= min_needed) or (min_needed == 0 and balance >= 0)
+            is_bad = (min_needed > 0 and income < min_needed) or balance < 0
+
+            month_item = {
+                "month": m,
+                "month_id": int(row["id"]),
+                "has_data": True,
+                "income": round(income, 2),
+                "expenses": round(expenses, 2),
+                "balance": round(balance, 2),
+                "min_needed": round(min_needed, 2),
+                "completion": completion,
+            }
+            month_items.append(month_item)
+
+            if is_good:
+                good_months.append(
+                    {
+                        "month": m,
+                        "income": round(income, 2),
+                        "balance": round(balance, 2),
+                        "completion": completion,
+                    }
+                )
+            elif is_bad:
+                bad_months.append(
+                    {
+                        "month": m,
+                        "income": round(income, 2),
+                        "balance": round(balance, 2),
+                        "completion": completion,
+                    }
+                )
+
+        totals["income"] = round(totals["income"], 2)
+        totals["expenses"] = round(totals["expenses"], 2)
+        totals["balance"] = round(totals["balance"], 2)
+        totals["min_needed"] = round(totals["min_needed"], 2)
+        totals["completion"] = (
+            round(totals["income"] / totals["min_needed"], 4) if totals["min_needed"] > 0 else 0.0
+        )
+
+        prev_year = year - 1
+        prev_totals = {
+            "income": 0.0,
+            "expenses": 0.0,
+            "balance": 0.0,
+            "min_needed": 0.0,
+            "months_count": 0,
+        }
+        prev_months = db_fetchall("SELECT id FROM months WHERE year=?;", (prev_year,))
+        for row in prev_months:
+            summary = compute_month_summary(int(row["id"]), ensure_tithe=True)
+            prev_totals["income"] += float(summary["month_income_sum"])
+            prev_totals["expenses"] += float(summary["month_expenses_sum"])
+            prev_totals["balance"] += float(summary["month_balance"])
+            prev_totals["min_needed"] += float(summary["monthly_min_needed"])
+            prev_totals["months_count"] += 1
+
+        prev_totals["income"] = round(prev_totals["income"], 2)
+        prev_totals["expenses"] = round(prev_totals["expenses"], 2)
+        prev_totals["balance"] = round(prev_totals["balance"], 2)
+        prev_totals["min_needed"] = round(prev_totals["min_needed"], 2)
+        prev_totals["completion"] = (
+            round(prev_totals["income"] / prev_totals["min_needed"], 4)
+            if prev_totals["min_needed"] > 0
+            else 0.0
+        )
+
+        def ratio(cur: float, prev: float) -> Optional[float]:
+            if prev == 0:
+                return None
+            return (cur - prev) / prev
+
+        yoy = {
+            "income": ratio(totals["income"], prev_totals["income"]),
+            "expenses": ratio(totals["expenses"], prev_totals["expenses"]),
+            "balance": ratio(totals["balance"], prev_totals["balance"]),
+        }
+
+        return {
+            "year": year,
+            "months": month_items,
+            "totals": totals,
+            "prev_year": {"year": prev_year, "totals": prev_totals},
+            "yoy": yoy,
+            "good_months": good_months,
+            "bad_months": bad_months,
+        }
+
 
 # ---------------------------
 # Audit
@@ -1553,6 +1687,14 @@ def month_summary(
     u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
 ):
     return compute_month_summary(month_id, ensure_tithe=True)
+
+
+@APP.get("/api/analytics/year")
+def year_analytics(
+    year: int = Query(...),
+    u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    return compute_year_analytics(int(year))
 
 
 @APP.put("/api/months/{month_id}")
