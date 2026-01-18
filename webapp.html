@@ -171,6 +171,41 @@
       box-shadow: var(--shadow);
       overflow: hidden;
     }
+    .collectionCard{
+      padding: 0;
+    }
+    .collectionToggle{
+      width: 100%;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .collectionToggle:active{ transform: scale(.99); }
+    .collectionMeta{
+      display:flex;
+      flex-direction:column;
+      gap: 4px;
+      min-width: 0;
+    }
+    .collectionBody{
+      padding: 0 12px 12px;
+      border-top: 1px solid var(--stroke);
+    }
+    .collectionChevron{
+      color: var(--muted);
+      transition: transform .18s ease;
+    }
+    .collectionCard.expanded .collectionChevron{
+      transform: rotate(180deg);
+    }
     .metric{
       padding: 12px 12px 10px;
       min-height: 82px;
@@ -765,62 +800,73 @@
 
       <div class="section">
         <div class="sectionHeader">
-          <h3>Аналитика года</h3>
-          <span id="yearMeta" class="tiny muted2">—</span>
+          <h3>Подборки</h3>
+          <span class="tiny muted2">Редкие отчёты</span>
         </div>
 
-        <div class="grid2">
-          <div class="card metric">
-            <div class="label">Доход года (YTD)</div>
-            <div id="yIncome" class="value mono">—</div>
-            <div class="sub">Σ пожертвования</div>
-          </div>
-          <div class="card metric">
-            <div class="label">Расход года (YTD)</div>
-            <div id="yExpenses" class="value mono">—</div>
-            <div class="sub">Σ расходов</div>
-          </div>
-          <div class="card metric">
-            <div class="label">Баланс года (YTD)</div>
-            <div id="yBalance" class="value mono">—</div>
-            <div class="sub">доход − расход</div>
-          </div>
-          <div class="card metric">
-            <div class="label">Рост к прошлому году</div>
-            <div id="yYoY" class="value mono">—</div>
-            <div class="sub">по доходу</div>
-          </div>
-        </div>
-
-        <div class="card bigCard" style="margin-top:12px;">
-          <div class="rowBetween">
-            <div class="small muted">Динамика доходов и расходов</div>
-            <div class="tiny muted2">по месяцам</div>
-          </div>
-          <div class="chartWrap">
-            <canvas id="yearLine"></canvas>
-          </div>
-        </div>
-
-        <div class="card bigCard" style="margin-top:12px;">
-          <div class="rowBetween">
-            <div class="small muted">Баланс по месяцам</div>
-            <div class="tiny muted2">профицит/дефицит</div>
-          </div>
-          <div class="chartWrap">
-            <canvas id="yearBalanceBar"></canvas>
-          </div>
-        </div>
-
-        <div class="card bigCard" style="margin-top:12px;">
-          <div class="grid2">
-            <div>
-              <div class="small muted">Хорошие месяцы</div>
-              <div id="goodMonths" class="chips"></div>
+        <div id="yearCollection" class="card bigCard collectionCard">
+          <button id="yearCollectionToggle" class="collectionToggle" type="button" aria-expanded="false">
+            <div class="collectionMeta">
+              <div class="bold">Годовая аналитика</div>
+              <div id="yearMeta" class="tiny muted2">—</div>
             </div>
-            <div>
-              <div class="small muted">Плохие месяцы</div>
-              <div id="badMonths" class="chips"></div>
+            <span class="icon collectionChevron">expand_more</span>
+          </button>
+          <div id="yearCollectionBody" class="collectionBody hidden">
+            <div class="grid2">
+              <div class="card metric">
+                <div class="label">Доход года (YTD)</div>
+                <div id="yIncome" class="value mono">—</div>
+                <div class="sub">Σ пожертвования</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Расход года (YTD)</div>
+                <div id="yExpenses" class="value mono">—</div>
+                <div class="sub">Σ расходов</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Баланс года (YTD)</div>
+                <div id="yBalance" class="value mono">—</div>
+                <div class="sub">доход − расход</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Рост к прошлому году</div>
+                <div id="yYoY" class="value mono">—</div>
+                <div class="sub">по доходу</div>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Динамика доходов и расходов</div>
+                <div class="tiny muted2">по месяцам</div>
+              </div>
+              <div class="chartWrap">
+                <canvas id="yearLine"></canvas>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Баланс по месяцам</div>
+                <div class="tiny muted2">профицит/дефицит</div>
+              </div>
+              <div class="chartWrap">
+                <canvas id="yearBalanceBar"></canvas>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="grid2">
+                <div>
+                  <div class="small muted">Хорошие месяцы</div>
+                  <div id="goodMonths" class="chips"></div>
+                </div>
+                <div>
+                  <div class="small muted">Плохие месяцы</div>
+                  <div id="badMonths" class="chips"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1514,6 +1560,15 @@
       return false;
     }
 
+    function refreshSundayDates(){
+      State.sundayDates = computeSundays(State.year, State.month);
+      if (State.sundayDates.length === 0) {
+        State.sundayIndex = 0;
+        return;
+      }
+      State.sundayIndex = clamp(findDefaultSundayIndex(), 0, State.sundayDates.length - 1);
+    }
+
     async function createMonthIfAdmin(){
       if (State.role !== "admin") {
         alert("Только admin может создавать месяц.");
@@ -1538,10 +1593,12 @@
      **********************/
     async function refreshAll(){
       await loadYearAnalytics();
+      refreshSundayDates();
       if (!State.monthId) {
         // clear UI
         renderEmptyMonth();
         renderYearAnalytics();
+        updateDonationDateUI();
         return;
       }
       const [summary, services, expenses] = await Promise.all([
@@ -1674,7 +1731,15 @@
       $("#yYoY").textContent = fmtPercent(ya.yoy?.income, 1);
 
       renderYearChips(ya.good_months || [], ya.bad_months || []);
-      renderYearCharts(ya.months || []);
+      const isExpanded = !$("#yearCollectionBody").classList.contains("hidden");
+      if (isExpanded) {
+        renderYearCharts(ya.months || []);
+      } else {
+        try { State.charts.yearLine?.destroy(); } catch {}
+        try { State.charts.yearBalanceBar?.destroy(); } catch {}
+        State.charts.yearLine = null;
+        State.charts.yearBalanceBar = null;
+      }
     }
 
     function renderYearEmpty(){
@@ -2226,6 +2291,16 @@
       recalcExpenseTotals();
     }
 
+    function setYearCollectionExpanded(expanded){
+      const card = $("#yearCollection");
+      const body = $("#yearCollectionBody");
+      const toggle = $("#yearCollectionToggle");
+      card.classList.toggle("expanded", expanded);
+      body.classList.toggle("hidden", !expanded);
+      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      if (expanded) renderYearAnalytics();
+    }
+
     /**********************
      * Navigation + tabs
      **********************/
@@ -2691,6 +2766,10 @@
       });
       $("#createMonthBtn").addEventListener("click", async ()=>{
         try{ await createMonthIfAdmin(); } catch(e){ alert(String(e.message||e)); }
+      });
+      $("#yearCollectionToggle").addEventListener("click", ()=>{
+        const isExpanded = !$("#yearCollectionBody").classList.contains("hidden");
+        setYearCollectionExpanded(!isExpanded);
       });
 
       // add tabs
