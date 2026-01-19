@@ -40,6 +40,7 @@ from zoneinfo import ZoneInfo
 # aiogram v3
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -1010,14 +1011,57 @@ def last_sunday(today: dt.date) -> dt.date:
     return today - dt.timedelta(days=delta)
 
 
+def format_telegram_exception(exc: Exception) -> str:
+    msg = str(exc)
+    lower = msg.lower()
+    hint = ""
+    if "chat not found" in lower:
+        hint = "Чат не найден. Проверьте chat_id и добавьте бота в чат/канал или нажмите /start."
+    elif "bot was blocked by the user" in lower:
+        hint = "Бот заблокирован пользователем. Нужно разблокировать и снова нажать /start."
+    elif "not enough rights" in lower or "administrator rights" in lower:
+        hint = "У бота нет прав в чате. Проверьте, что бот добавлен и имеет доступ к отправке сообщений."
+    return f"{msg}. {hint}".strip()
+
+
 async def bot_send_safe(chat_id: int, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None) -> None:
     if not bot:
         return
     try:
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-    except Exception:
+    except Exception as exc:
         # avoid crashing scheduler/bot
-        print("Failed to send message:", traceback.format_exc())
+        print("Failed to send message:", format_telegram_exception(exc))
+
+
+async def bot_send_or_http_error(
+    chat_id: int,
+    text: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+) -> None:
+    if not bot:
+        raise HTTPException(status_code=503, detail="Bot is not initialized")
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    except TelegramForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=format_telegram_exception(exc))
+    except TelegramBadRequest as exc:
+        raise HTTPException(status_code=400, detail=format_telegram_exception(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=format_telegram_exception(exc))
+
+
+async def ensure_report_chat_reachable(chat_id: int) -> None:
+    if not bot:
+        raise HTTPException(status_code=503, detail="Bot is not initialized")
+    try:
+        await bot.get_chat(chat_id)
+    except TelegramForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=format_telegram_exception(exc))
+    except TelegramBadRequest as exc:
+        raise HTTPException(status_code=400, detail=format_telegram_exception(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=format_telegram_exception(exc))
 
 
 @router.message(Command("start"))
@@ -2013,7 +2057,7 @@ def api_get_settings(u: sqlite3.Row = Depends(require_role("admin", "accountant"
 
 
 @APP.put("/api/settings")
-def api_update_settings(
+async def api_update_settings(
     body: SettingsUpdateIn,
     u: sqlite3.Row = Depends(require_role("admin")),
 ):
@@ -2022,8 +2066,11 @@ def api_update_settings(
     params: List[Any] = []
 
     if body.report_chat_id is not None:
+        report_chat_id = int(body.report_chat_id) if body.report_chat_id is not None else None
+        if report_chat_id is not None:
+            await ensure_report_chat_reachable(report_chat_id)
         fields.append("report_chat_id=?")
-        params.append(int(body.report_chat_id) if body.report_chat_id is not None else None)
+        params.append(report_chat_id)
 
     if body.sunday_report_time is not None:
         fields.append("sunday_report_time=?")
@@ -2073,7 +2120,7 @@ async def api_report_sunday(u: sqlite3.Row = Depends(require_role("admin", "acco
     tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
     today = dt.datetime.now(tzinfo).date()
     text, kb = build_sunday_report_text(today)
-    await bot_send_safe(int(chat_id), text, kb)
+    await bot_send_or_http_error(int(chat_id), text, kb)
     return {"ok": True}
 
 
@@ -2087,7 +2134,7 @@ async def api_report_month_expenses(u: sqlite3.Row = Depends(require_role("admin
     tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
     today = dt.datetime.now(tzinfo).date()
     text, kb = build_month_expenses_report_text(today)
-    await bot_send_safe(int(chat_id), text, kb)
+    await bot_send_or_http_error(int(chat_id), text, kb)
     return {"ok": True}
 
 
@@ -2105,7 +2152,7 @@ async def api_report_test(u: sqlite3.Row = Depends(require_role("admin", "accoun
         f"Если вы это видите, доставка работает.\n"
         f"Время: {now:%Y-%m-%d %H:%M:%S %Z}"
     )
-    await bot_send_safe(int(chat_id), text, None)
+    await bot_send_or_http_error(int(chat_id), text, None)
     return {"ok": True}
 
 
