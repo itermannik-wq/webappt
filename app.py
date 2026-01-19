@@ -230,6 +230,18 @@ def init_db() -> None:
         );
         """
     )
+    # bot subscribers (anyone who started bot can receive reports)
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS bot_subscribers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
     # audit_log
     db_exec(
         """
@@ -345,7 +357,37 @@ def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
         sync_allowlist_to_db(allow)
         ALLOWLIST_CACHE = allow
         ALLOWLIST_MTIME = mtime
-    return ALLOWLIST_CACHE
+        return ALLOWLIST_CACHE
+
+def register_bot_subscriber(telegram_id: int) -> None:
+    now = iso_now(CFG.tzinfo())
+    existing = db_fetchone("SELECT * FROM bot_subscribers WHERE telegram_id=?;", (telegram_id,))
+    if not existing:
+        db_exec(
+            """
+            INSERT INTO bot_subscribers (telegram_id, active, created_at, updated_at)
+            VALUES (?, 1, ?, ?);
+            """,
+            (telegram_id, now, now),
+        )
+        return
+    db_exec(
+        """
+        UPDATE bot_subscribers SET active=1, updated_at=?
+        WHERE telegram_id=?;
+        """,
+        (now, telegram_id),
+    )
+
+def list_report_recipients(settings_row: Optional[sqlite3.Row] = None) -> List[int]:
+    s = settings_row or get_settings()
+    ids: set[int] = set()
+    chat_id = s["report_chat_id"]
+    if chat_id:
+        ids.add(int(chat_id))
+    rows = db_fetchall("SELECT telegram_id FROM bot_subscribers WHERE active=1;")
+    ids.update(int(r["telegram_id"]) for r in rows)
+    return sorted(ids)
 
 # ---------------------------
 # Session token (HMAC signed JSON) - self-contained (no external JWT deps)
@@ -1082,9 +1124,34 @@ async def ensure_report_chat_reachable(chat_id: int) -> None:
         raise HTTPException(status_code=502, detail=format_telegram_exception(exc))
 
 
+async def send_report_to_recipients(
+        text: str,
+        reply_markup: Optional[InlineKeyboardMarkup],
+        recipients: List[int],
+        raise_on_error: bool,
+) -> None:
+    if not recipients:
+        if raise_on_error:
+            raise HTTPException(status_code=400, detail="No report recipients configured")
+        return
+    errors: List[str] = []
+    for chat_id in recipients:
+        try:
+            if raise_on_error:
+                await bot_send_or_http_error(chat_id, text, reply_markup)
+            else:
+                await bot_send_safe(chat_id, text, reply_markup)
+        except HTTPException as exc:
+            errors.append(f"{chat_id}: {exc.detail}")
+    if errors and raise_on_error:
+        raise HTTPException(status_code=502, detail="; ".join(errors))
+
+
 @router.message(Command("start"))
 async def on_start(m: Message):
     tid = m.from_user.id if m.from_user else 0
+    if tid:
+        register_bot_subscriber(tid)
     if not tid or not is_allowed_telegram_user(tid):
         await m.answer(
             "Доступ запрещён. Ваш Telegram ID не в allowlist.\n"
@@ -1592,25 +1659,24 @@ def reschedule_jobs() -> None:
 
 async def run_sunday_report_job() -> None:
     s = get_settings()
-    chat_id = s["report_chat_id"]
-    if not chat_id:
+    recipients = list_report_recipients(s)
+    if not recipients:
         return
     tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
     today = dt.datetime.now(tzinfo).date()
     text, kb = build_sunday_report_text(today)
-    await bot_send_safe(int(chat_id), text, kb)
+    await send_report_to_recipients(text, kb, recipients, raise_on_error=False)
 
 
 async def run_daily_expenses_job() -> None:
     s = get_settings()
-    chat_id = s["report_chat_id"]
-    if not chat_id:
+    recipients = list_report_recipients(s)
+    if not recipients:
         return
     tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
     today = dt.datetime.now(tzinfo).date()
     text, kb = build_month_expenses_report_text(today)
-    await bot_send_safe(int(chat_id), text, kb)
-
+    await send_report_to_recipients(text, kb, recipients, raise_on_error=False)
 
 # ---------------------------
 # FastAPI app
@@ -2141,37 +2207,37 @@ async def api_update_settings(
 @APP.post("/api/reports/sunday")
 async def api_report_sunday(u: sqlite3.Row = Depends(require_role("admin", "accountant"))):
     s = get_settings()
-    chat_id = s["report_chat_id"]
-    if not chat_id:
-        raise HTTPException(status_code=400, detail="settings.report_chat_id is not set")
+    recipients = list_report_recipients(s)
+    if not recipients:
+        raise HTTPException(status_code=400, detail="No report recipients configured")
 
     tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
     today = dt.datetime.now(tzinfo).date()
     text, kb = build_sunday_report_text(today)
-    await bot_send_or_http_error(int(chat_id), text, kb)
+    await send_report_to_recipients(text, kb, recipients, raise_on_error=True)
     return {"ok": True}
+
 
 
 @APP.post("/api/reports/month_expenses")
 async def api_report_month_expenses(u: sqlite3.Row = Depends(require_role("admin", "accountant"))):
     s = get_settings()
-    chat_id = s["report_chat_id"]
-    if not chat_id:
-        raise HTTPException(status_code=400, detail="settings.report_chat_id is not set")
+    recipients = list_report_recipients(s)
+    if not recipients:
+        raise HTTPException(status_code=400, detail="No report recipients configured")
 
     tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
     today = dt.datetime.now(tzinfo).date()
     text, kb = build_month_expenses_report_text(today)
-    await bot_send_or_http_error(int(chat_id), text, kb)
+    await send_report_to_recipients(text, kb, recipients, raise_on_error=True)
     return {"ok": True}
-
 
 @APP.post("/api/reports/test")
 async def api_report_test(u: sqlite3.Row = Depends(require_role("admin", "accountant"))):
     s = get_settings()
-    chat_id = s["report_chat_id"]
-    if not chat_id:
-        raise HTTPException(status_code=400, detail="settings.report_chat_id is not set")
+    recipients = list_report_recipients(s)
+    if not recipients:
+        raise HTTPException(status_code=400, detail="No report recipients configured")
 
     tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
     now = dt.datetime.now(tzinfo)
@@ -2180,7 +2246,7 @@ async def api_report_test(u: sqlite3.Row = Depends(require_role("admin", "accoun
         f"Если вы это видите, доставка работает.\n"
         f"Время: {now:%Y-%m-%d %H:%M:%S %Z}"
     )
-    await bot_send_or_http_error(int(chat_id), text, None)
+    await send_report_to_recipients(text, None, recipients, raise_on_error=True)
     return {"ok": True}
 
 
