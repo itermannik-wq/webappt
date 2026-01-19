@@ -12,12 +12,15 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
 import traceback
 import urllib.parse
+import zipfile
 from contextlib import asynccontextmanager
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import (
@@ -25,9 +28,11 @@ from fastapi import (
     Depends,
     FastAPI,
     HTTPException,
+    File,
     Query,
     Request,
     Response,
+    UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -100,6 +105,9 @@ def load_config() -> Config:
 
 
 CFG = load_config()
+UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 
 
 # ---------------------------
@@ -260,6 +268,259 @@ def init_db() -> None:
         """
     )
 
+    # accounts
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            opening_balance REAL NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            created_by INTEGER NOT NULL
+        );
+        """
+    )
+    # categories
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            type TEXT NOT NULL CHECK (type IN ('expense','income')),
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            created_by INTEGER NOT NULL,
+            updated_at TEXT,
+            updated_by INTEGER
+        );
+        """
+    )
+    # category aliases
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS category_aliases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id INTEGER NOT NULL,
+            alias TEXT NOT NULL,
+            normalized_alias TEXT NOT NULL,
+            type TEXT NOT NULL CHECK (type IN ('expense','income')),
+            created_at TEXT NOT NULL,
+            created_by INTEGER NOT NULL,
+            UNIQUE(normalized_alias, type),
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+        );
+        """
+    )
+    # tags
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            normalized_name TEXT UNIQUE NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            created_by INTEGER NOT NULL
+        );
+        """
+    )
+    # transactions
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL CHECK (type IN ('expense','income','transfer')),
+            status TEXT NOT NULL CHECK (status IN ('draft','posted','void')) DEFAULT 'draft',
+            date TEXT NOT NULL,
+            amount REAL NOT NULL CHECK (amount>=0),
+            currency TEXT NOT NULL DEFAULT 'EUR',
+            category_id INTEGER NULL,
+            description TEXT NULL,
+            account_id INTEGER NULL,
+            from_account_id INTEGER NULL,
+            to_account_id INTEGER NULL,
+            counterparty TEXT NULL,
+            created_by INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_by INTEGER NULL,
+            updated_at TEXT NULL,
+            is_system INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+            FOREIGN KEY (from_account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+            FOREIGN KEY (to_account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        """
+    )
+    db_exec("CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);")
+    db_exec("CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);")
+    db_exec("CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);")
+    db_exec(
+        "CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(account_id, from_account_id, to_account_id);"
+    )
+    # transaction_tags
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS transaction_tags (
+            transaction_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            PRIMARY KEY (transaction_id, tag_id),
+            FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        );
+        """
+    )
+    # attachments
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            storage_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            preview_path TEXT NULL,
+            uploaded_by INTEGER NOT NULL,
+            uploaded_at TEXT NOT NULL,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_by INTEGER NULL,
+            deleted_at TEXT NULL,
+            delete_reason TEXT NULL,
+            FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+        );
+        """
+    )
+    db_exec("CREATE INDEX IF NOT EXISTS idx_attach_tx ON attachments(transaction_id);")
+    db_exec("CREATE INDEX IF NOT EXISTS idx_attach_sha ON attachments(sha256);")
+    # budgets
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS budgets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month TEXT NOT NULL,
+            category_id INTEGER NOT NULL,
+            amount REAL NOT NULL CHECK (amount>=0),
+            currency TEXT NOT NULL DEFAULT 'EUR',
+            warning_threshold_1 REAL NOT NULL DEFAULT 0.8,
+            warning_threshold_2 REAL NOT NULL DEFAULT 1.0,
+            created_at TEXT NOT NULL,
+            created_by INTEGER NOT NULL,
+            updated_at TEXT NULL,
+            updated_by INTEGER NULL,
+            UNIQUE(month, category_id),
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+        );
+        """
+    )
+    # month locks
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS month_locks (
+            month TEXT PRIMARY KEY,
+            locked_at TEXT NOT NULL,
+            locked_by INTEGER NOT NULL,
+            comment TEXT NULL,
+            unlocked_at TEXT NULL,
+            unlocked_by INTEGER NULL,
+            unlock_reason TEXT NULL
+        );
+        """
+    )
+    # notification settings
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS notification_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            params_json TEXT NULL,
+            chat_targets_json TEXT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NULL,
+            updated_by INTEGER NULL
+        );
+        """
+    )
+    # notifications
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            sent_at TEXT NULL,
+            error_text TEXT NULL
+        );
+        """
+    )
+    # backups
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS backups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            created_by INTEGER NULL,
+            kind TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            size_bytes INTEGER NULL,
+            sha256 TEXT NULL,
+            status TEXT NOT NULL,
+            error_text TEXT NULL
+        );
+        """
+    )
+    # monitoring
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS error_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            occurred_at TEXT NOT NULL,
+            source TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            message TEXT NOT NULL,
+            stacktrace TEXT NULL,
+            request_id TEXT NULL,
+            user_id INTEGER NULL,
+            context_json TEXT NULL
+        );
+        """
+    )
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS job_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_name TEXT NOT NULL,
+            scheduled_for TEXT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT NULL,
+            status TEXT NOT NULL,
+            result_json TEXT NULL,
+            error_text TEXT NULL
+        );
+        """
+    )
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS telegram_delivery_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_type TEXT NOT NULL,
+            target_chat_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            sent_at TEXT NULL,
+            error_text TEXT NULL,
+            payload_json TEXT NULL
+        );
+        """
+    )
+
     # Ensure settings row exists (id=1)
     row = db_fetchone("SELECT * FROM settings ORDER BY id LIMIT 1;")
     if not row:
@@ -289,6 +550,31 @@ def iso_date(d: dt.date) -> str:
 
 def parse_iso_date(s: str) -> dt.date:
     return dt.date.fromisoformat(s)
+
+
+def normalize_text(value: str) -> str:
+    text = (value or "").strip().lower()
+    text = text.replace("ё", "е")
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^\w\s-]", "", text)
+    return text
+
+
+def month_key(date_str: str) -> str:
+    d = parse_iso_date(date_str)
+    return f"{d.year:04d}-{d.month:02d}"
+
+
+def is_month_locked(month: str) -> bool:
+    row = db_fetchone("SELECT month FROM month_locks WHERE month=? AND unlocked_at IS NULL;", (month,))
+    return row is not None
+
+
+def ensure_month_unlocked(date_str: str, role: str) -> None:
+    if role == "admin":
+        return
+    if is_month_locked(month_key(date_str)):
+        raise HTTPException(status_code=409, detail="Месяц закрыт")
 
 
 # ---------------------------
@@ -925,6 +1211,41 @@ def log_audit(
         ),
     )
 
+    def log_error(
+            source: str,
+            severity: str,
+            message: str,
+            stacktrace: Optional[str] = None,
+            user_id: Optional[int] = None,
+            context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        now = iso_now(CFG.tzinfo())
+        db_exec(
+            """
+            INSERT INTO error_logs (
+                occurred_at, source, severity, message, stacktrace, user_id, context_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                now,
+                source,
+                severity,
+                message,
+                stacktrace,
+                user_id,
+                json.dumps(context, ensure_ascii=False) if context else None,
+            ),
+        )
+
+    def ok(data: Any) -> Dict[str, Any]:
+        return {"ok": True, "data": data}
+
+    def err(code: str, message: str, details: Optional[Dict[str, Any]] = None, status: int = 400) -> JSONResponse:
+        return JSONResponse(
+            status_code=status,
+            content={"ok": False, "error": {"code": code, "message": message, "details": details or {}}},
+        )
+
 
 # ---------------------------
 # API Auth + roles
@@ -1009,6 +1330,154 @@ class SettingsUpdateIn(BaseModel):
     timezone: Optional[str] = None
     ui_theme: Optional[str] = None
     daily_expenses_enabled: Optional[bool] = None
+
+
+class AccountIn(BaseModel):
+    name: str
+    opening_balance: float = 0.0
+    is_active: bool = True
+
+
+class AccountUpdateIn(BaseModel):
+    name: Optional[str] = None
+    opening_balance: Optional[float] = None
+    is_active: Optional[bool] = None
+
+
+class CategoryIn(BaseModel):
+    name: str
+    type: str
+    is_active: bool = True
+
+
+class CategoryUpdateIn(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class CategoryAliasIn(BaseModel):
+    alias: str
+    type: str
+
+
+class CategoryMergeIn(BaseModel):
+    target_id: int
+    source_ids: List[int]
+    budget_merge_mode: str = "sum"
+
+
+class TagIn(BaseModel):
+    name: str
+
+
+class TagUpdateIn(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class TransactionIn(BaseModel):
+    type: str
+    status: str = "draft"
+    date: str
+    amount: float = 0.0
+    currency: str = "EUR"
+    category_id: Optional[int] = None
+    description: Optional[str] = None
+    account_id: Optional[int] = None
+    from_account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    counterparty: Optional[str] = None
+    tag_ids: List[int] = []
+
+
+class TransactionUpdateIn(BaseModel):
+    type: Optional[str] = None
+    status: Optional[str] = None
+    date: Optional[str] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    category_id: Optional[int] = None
+    description: Optional[str] = None
+    account_id: Optional[int] = None
+    from_account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    counterparty: Optional[str] = None
+    tag_ids: Optional[List[int]] = None
+
+
+class TransactionTagsIn(BaseModel):
+    tag_ids: List[int]
+
+
+class BudgetIn(BaseModel):
+    month: str
+    category_id: int
+    amount: float
+    currency: str = "EUR"
+    warning_threshold_1: float = 0.8
+    warning_threshold_2: float = 1.0
+
+
+class BudgetUpdateIn(BaseModel):
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    warning_threshold_1: Optional[float] = None
+    warning_threshold_2: Optional[float] = None
+
+
+class MonthLockIn(BaseModel):
+    month: str
+    comment: Optional[str] = None
+
+
+class MonthUnlockIn(BaseModel):
+    month: str
+    reason: str
+
+
+def validate_transaction_payload(payload: Dict[str, Any], status: str) -> None:
+    tx_type = payload.get("type")
+    if tx_type not in ("expense", "income", "transfer"):
+        raise HTTPException(status_code=400, detail="Неверный тип операции")
+
+    date_str = payload.get("date")
+    if not date_str:
+        raise HTTPException(status_code=400, detail="Дата обязательна")
+    try:
+        parse_iso_date(date_str)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Неверный формат даты") from exc
+
+    amount = float(payload.get("amount") or 0)
+    if amount < 0:
+        raise HTTPException(status_code=400, detail="Сумма не может быть отрицательной")
+
+    if status == "posted" and amount <= 0:
+        raise HTTPException(status_code=400, detail="Для проведения сумма должна быть > 0")
+
+    if tx_type in ("expense", "income"):
+        if status == "posted":
+            if not payload.get("category_id"):
+                raise HTTPException(status_code=400, detail="Категория обязательна")
+            if not payload.get("account_id"):
+                raise HTTPException(status_code=400, detail="Счет обязателен")
+    if tx_type == "transfer":
+        if status == "posted":
+            if not payload.get("from_account_id") or not payload.get("to_account_id"):
+                raise HTTPException(status_code=400, detail="Счета перевода обязательны")
+            if payload.get("from_account_id") == payload.get("to_account_id"):
+                raise HTTPException(status_code=400, detail="Счета перевода должны отличаться")
+
+
+def set_transaction_tags(tx_id: int, tag_ids: List[int]) -> None:
+    with db_connect() as conn:
+        conn.execute("DELETE FROM transaction_tags WHERE transaction_id=?;", (tx_id,))
+        for tag_id in tag_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?);",
+                (tx_id, tag_id),
+            )
+        conn.commit()
 
 
 # ---------------------------
@@ -1793,6 +2262,20 @@ async def lifespan(app: FastAPI):
 
 APP = FastAPI(title="Church Accounting Bot", version="1.0.0", lifespan=lifespan)
 
+@APP.middleware("http")
+async def error_logging_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        log_error(
+            source="api",
+            severity="error",
+            message=str(exc),
+            stacktrace=traceback.format_exc(),
+            context={"path": request.url.path, "method": request.method},
+        )
+        raise
+
 APP.add_middleware(
     CORSMiddleware,
     allow_origins=[CFG.APP_URL, CFG.WEBAPP_URL, "http://localhost", "http://localhost:8000", "*"],
@@ -2227,8 +2710,20 @@ def api_get_settings(u: sqlite3.Row = Depends(require_role("admin", "accountant"
 @APP.put("/api/settings")
 async def api_update_settings(
     body: SettingsUpdateIn,
-    u: sqlite3.Row = Depends(require_role("admin")),
+    u: sqlite3.Row = Depends(require_role("admin", "viewer")),
 ):
+    role = str(u["role"])
+    if role != "admin":
+        non_theme_fields = [
+            body.report_chat_id,
+            body.sunday_report_time,
+            body.month_report_time,
+            body.timezone,
+            body.daily_expenses_enabled,
+        ]
+        if body.ui_theme is None or any(field is not None for field in non_theme_fields):
+            raise HTTPException(status_code=403, detail="Only theme updates allowed")
+
     before = get_settings()
     fields = []
     params: List[Any] = []
@@ -2322,6 +2817,1079 @@ async def api_report_test(u: sqlite3.Row = Depends(require_role("admin", "accoun
     )
     await send_report_to_recipients(text, None, recipients, raise_on_error=True)
     return {"ok": True}
+
+
+# ---------------------------
+# New accounting: directories, transactions, reports
+# ---------------------------
+
+@APP.get("/api/accounts")
+def list_accounts(u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer"))):
+    rows = db_fetchall("SELECT * FROM accounts WHERE is_active=1 ORDER BY name ASC;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.post("/api/accounts")
+def create_account(
+        body: AccountIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    now = iso_now(CFG.tzinfo())
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO accounts (name, is_active, opening_balance, created_at, created_by)
+        VALUES (?, ?, ?, ?, ?);
+        """,
+        (body.name.strip(), 1 if body.is_active else 0, float(body.opening_balance), now, int(u["id"])),
+    )
+    after = db_fetchone("SELECT * FROM accounts WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "account", int(new_id), None, dict(after) if after else None)
+    return ok({"id": new_id})
+
+
+@APP.patch("/api/accounts/{account_id}")
+def update_account(
+        account_id: int,
+        body: AccountUpdateIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    before = db_fetchone("SELECT * FROM accounts WHERE id=?;", (account_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Account not found")
+    fields = []
+    params: List[Any] = []
+    if body.name is not None:
+        fields.append("name=?")
+        params.append(body.name.strip())
+    if body.opening_balance is not None:
+        fields.append("opening_balance=?")
+        params.append(float(body.opening_balance))
+    if body.is_active is not None:
+        fields.append("is_active=?")
+        params.append(1 if body.is_active else 0)
+    if not fields:
+        return ok({"updated": False})
+    params.append(account_id)
+    db_exec(f"UPDATE accounts SET {', '.join(fields)} WHERE id=?;", tuple(params))
+    after = db_fetchone("SELECT * FROM accounts WHERE id=?;", (account_id,))
+    log_audit(int(u["id"]), "UPDATE", "account", account_id, dict(before), dict(after) if after else None)
+    return ok({"updated": True})
+
+
+@APP.get("/api/categories")
+def list_categories(
+        type: Optional[str] = Query(default=None),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    if type and type not in ("expense", "income"):
+        raise HTTPException(status_code=400, detail="Invalid type")
+    if type:
+        rows = db_fetchall("SELECT * FROM categories WHERE type=? ORDER BY name ASC;", (type,))
+    else:
+        rows = db_fetchall("SELECT * FROM categories ORDER BY name ASC;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.post("/api/categories")
+def create_category(
+        body: CategoryIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    if body.type not in ("expense", "income"):
+        raise HTTPException(status_code=400, detail="Invalid type")
+    now = iso_now(CFG.tzinfo())
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO categories (name, type, is_active, created_at, created_by)
+        VALUES (?, ?, ?, ?, ?);
+        """,
+        (body.name.strip(), body.type, 1 if body.is_active else 0, now, int(u["id"])),
+    )
+    after = db_fetchone("SELECT * FROM categories WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "category", int(new_id), None, dict(after) if after else None)
+    return ok({"id": new_id})
+
+
+@APP.patch("/api/categories/{category_id}")
+def update_category(
+        category_id: int,
+        body: CategoryUpdateIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    before = db_fetchone("SELECT * FROM categories WHERE id=?;", (category_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Category not found")
+    fields = []
+    params: List[Any] = []
+    if body.name is not None:
+        fields.append("name=?")
+        params.append(body.name.strip())
+    if body.is_active is not None:
+        fields.append("is_active=?")
+        params.append(1 if body.is_active else 0)
+    if not fields:
+        return ok({"updated": False})
+    fields.append("updated_at=?")
+    fields.append("updated_by=?")
+    params.append(iso_now(CFG.tzinfo()))
+    params.append(int(u["id"]))
+    params.append(category_id)
+    db_exec(f"UPDATE categories SET {', '.join(fields)} WHERE id=?;", tuple(params))
+    after = db_fetchone("SELECT * FROM categories WHERE id=?;", (category_id,))
+    log_audit(int(u["id"]), "UPDATE", "category", category_id, dict(before), dict(after) if after else None)
+    return ok({"updated": True})
+
+
+@APP.post("/api/categories/{category_id}/aliases")
+def create_category_alias(
+        category_id: int,
+        body: CategoryAliasIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    category = db_fetchone("SELECT * FROM categories WHERE id=?;", (category_id,))
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if body.type not in ("expense", "income"):
+        raise HTTPException(status_code=400, detail="Invalid type")
+    now = iso_now(CFG.tzinfo())
+    norm = normalize_text(body.alias)
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO category_aliases (category_id, alias, normalized_alias, type, created_at, created_by)
+        VALUES (?, ?, ?, ?, ?, ?);
+        """,
+        (category_id, body.alias.strip(), norm, body.type, now, int(u["id"])),
+    )
+    log_audit(int(u["id"]), "CREATE", "category_alias", int(new_id), None, {"id": new_id})
+    return ok({"id": new_id})
+
+
+@APP.delete("/api/category-aliases/{alias_id}")
+def delete_category_alias(
+        alias_id: int,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    before = db_fetchone("SELECT * FROM category_aliases WHERE id=?;", (alias_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Alias not found")
+    db_exec("DELETE FROM category_aliases WHERE id=?;", (alias_id,))
+    log_audit(int(u["id"]), "DELETE", "category_alias", alias_id, dict(before), None)
+    return ok({"deleted": True})
+
+
+@APP.post("/api/categories/merge")
+def merge_categories(
+        body: CategoryMergeIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    target_id = body.target_id
+    sources = [int(x) for x in body.source_ids]
+    budget_merge_mode = body.budget_merge_mode
+    if not sources:
+        raise HTTPException(status_code=400, detail="No source categories")
+    if target_id in sources:
+        raise HTTPException(status_code=400, detail="Target cannot be in sources")
+    if budget_merge_mode not in ("sum", "replace"):
+        raise HTTPException(status_code=400, detail="Invalid budget merge mode")
+
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE transactions SET category_id=? WHERE category_id IN (%s);"
+            % ",".join("?" for _ in sources),
+            tuple([target_id] + sources),
+        )
+        if budget_merge_mode == "sum":
+            rows = conn.execute(
+                "SELECT month, SUM(amount) AS s FROM budgets WHERE category_id IN (%s) GROUP BY month;"
+                % ",".join("?" for _ in sources),
+                tuple(sources),
+            ).fetchall()
+            for row in rows:
+                existing = conn.execute(
+                    "SELECT id, amount FROM budgets WHERE month=? AND category_id=?;",
+                    (row["month"], target_id),
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE budgets SET amount=? WHERE id=?;",
+                        (float(existing["amount"]) + float(row["s"]), int(existing["id"])),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO budgets (month, category_id, amount, created_at, created_by)
+                        VALUES (?, ?, ?, ?, ?);
+                        """,
+                        (row["month"], target_id, float(row["s"]), iso_now(CFG.tzinfo()), int(u["id"])),
+                    )
+            conn.execute(
+                "DELETE FROM budgets WHERE category_id IN (%s);" % ",".join("?" for _ in sources),
+                tuple(sources),
+            )
+        else:
+            conn.execute(
+                "UPDATE budgets SET category_id=? WHERE category_id IN (%s);"
+                % ",".join("?" for _ in sources),
+                tuple([target_id] + sources),
+            )
+        conn.execute(
+            "UPDATE category_aliases SET category_id=? WHERE category_id IN (%s);"
+            % ",".join("?" for _ in sources),
+            tuple([target_id] + sources),
+        )
+        conn.execute(
+            "UPDATE categories SET is_active=0, updated_at=?, updated_by=? WHERE id IN (%s);"
+            % ",".join("?" for _ in sources),
+            tuple([iso_now(CFG.tzinfo()), int(u["id"])] + sources),
+        )
+        conn.commit()
+    log_audit(int(u["id"]), "MERGE", "category", target_id, {"sources": sources}, {"target": target_id})
+    return ok({"merged": True})
+
+
+@APP.get("/api/tags")
+def list_tags(u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer"))):
+    rows = db_fetchall("SELECT * FROM tags WHERE is_active=1 ORDER BY name ASC;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.post("/api/tags")
+def create_tag(
+        body: TagIn,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    now = iso_now(CFG.tzinfo())
+    name = body.name.strip()
+    norm = normalize_text(name)
+    existing = db_fetchone("SELECT id FROM tags WHERE normalized_name=?;", (norm,))
+    if existing:
+        return ok({"id": int(existing["id"]), "existing": True})
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO tags (name, normalized_name, is_active, created_at, created_by)
+        VALUES (?, ?, 1, ?, ?);
+        """,
+        (name, norm, now, int(u["id"])),
+    )
+    log_audit(int(u["id"]), "CREATE", "tag", int(new_id), None, {"name": name})
+    return ok({"id": new_id, "existing": False})
+
+
+@APP.patch("/api/tags/{tag_id}")
+def update_tag(
+        tag_id: int,
+        body: TagUpdateIn,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM tags WHERE id=?;", (tag_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    fields = []
+    params: List[Any] = []
+    if body.name is not None:
+        fields.append("name=?")
+        params.append(body.name.strip())
+        fields.append("normalized_name=?")
+        params.append(normalize_text(body.name))
+    if body.is_active is not None:
+        fields.append("is_active=?")
+        params.append(1 if body.is_active else 0)
+    if not fields:
+        return ok({"updated": False})
+    params.append(tag_id)
+    db_exec(f"UPDATE tags SET {', '.join(fields)} WHERE id=?;", tuple(params))
+    after = db_fetchone("SELECT * FROM tags WHERE id=?;", (tag_id,))
+    log_audit(int(u["id"]), "UPDATE", "tag", tag_id, dict(before), dict(after) if after else None)
+    return ok({"updated": True})
+
+
+@APP.get("/api/transactions")
+def list_transactions(
+        status: Optional[str] = Query(default=None),
+        type: Optional[str] = Query(default=None),
+        month: Optional[str] = Query(default=None),
+        tag_ids: Optional[str] = Query(default=None),
+        tag_mode: str = Query(default="any"),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    filters = ["1=1"]
+    params: List[Any] = []
+    tag_params: List[Any] = []
+    if status:
+        filters.append("t.status=?")
+        params.append(status)
+    if type:
+        filters.append("t.type=?")
+        params.append(type)
+    if month:
+        filters.append("substr(t.date,1,7)=?")
+        params.append(month)
+    if u["role"] == "viewer":
+        filters.append("t.status='posted'")
+    join_tags = ""
+    if tag_ids:
+        tag_list = [int(x) for x in tag_ids.split(",") if x.strip().isdigit()]
+        if tag_list:
+            placeholders = ",".join("?" for _ in tag_list)
+            tag_params.extend(tag_list)
+            if tag_mode == "all":
+                join_tags = f"""
+                        JOIN (
+                            SELECT transaction_id
+                            FROM transaction_tags
+                            WHERE tag_id IN ({placeholders})
+                            GROUP BY transaction_id
+                            HAVING COUNT(DISTINCT tag_id) = {len(tag_list)}
+                        ) tt ON tt.transaction_id = t.id
+                    """
+            else:
+                join_tags = f"""
+                        JOIN (
+                            SELECT DISTINCT transaction_id
+                            FROM transaction_tags
+                            WHERE tag_id IN ({placeholders})
+                        ) tt ON tt.transaction_id = t.id
+                    """
+    sql = f"""
+            SELECT t.*, c.name AS category_name,
+                (SELECT COUNT(*) FROM attachments a WHERE a.transaction_id=t.id AND a.is_deleted=0) AS attachments_count
+            FROM transactions t
+            LEFT JOIN categories c ON c.id=t.category_id
+            {join_tags}
+            WHERE {' AND '.join(filters)}
+            ORDER BY t.date DESC, t.id DESC;
+        """
+    rows = db_fetchall(sql, tuple(tag_params + params))
+    return ok([dict(r) for r in rows])
+
+
+@APP.post("/api/transactions")
+def create_transaction(
+        body: TransactionIn,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    if body.status not in ("draft", "posted", "void"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    payload = body.dict()
+    validate_transaction_payload(payload, body.status)
+    if body.status == "posted":
+        ensure_month_unlocked(body.date, u["role"])
+    now = iso_now(CFG.tzinfo())
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO transactions (
+            type, status, date, amount, currency, category_id, description,
+            account_id, from_account_id, to_account_id, counterparty,
+            created_by, created_at, is_system
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+        """,
+        (
+            body.type,
+            body.status,
+            body.date,
+            float(body.amount),
+            body.currency,
+            body.category_id,
+            body.description,
+            body.account_id,
+            body.from_account_id,
+            body.to_account_id,
+            body.counterparty,
+            int(u["id"]),
+            now,
+        ),
+    )
+    if body.tag_ids:
+        set_transaction_tags(new_id, body.tag_ids)
+    after = db_fetchone("SELECT * FROM transactions WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "transaction", int(new_id), None, dict(after) if after else None)
+    return ok({"id": new_id})
+
+
+@APP.patch("/api/transactions/{tx_id}")
+def update_transaction(
+        tx_id: int,
+        body: TransactionUpdateIn,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM transactions WHERE id=?;", (tx_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if before["status"] == "posted":
+        ensure_month_unlocked(before["date"], u["role"])
+    payload = dict(before)
+    payload.update({k: v for k, v in body.dict().items() if v is not None})
+    status = payload.get("status") or before["status"]
+    validate_transaction_payload(payload, status)
+    if status == "posted":
+        ensure_month_unlocked(payload["date"], u["role"])
+    fields = []
+    params: List[Any] = []
+    for key in (
+            "type",
+            "status",
+            "date",
+            "amount",
+            "currency",
+            "category_id",
+            "description",
+            "account_id",
+            "from_account_id",
+            "to_account_id",
+            "counterparty",
+    ):
+        value = payload.get(key)
+        if value is not None and value != before[key]:
+            fields.append(f"{key}=?")
+            params.append(value)
+    if fields:
+        fields.append("updated_by=?")
+        fields.append("updated_at=?")
+        params.append(int(u["id"]))
+        params.append(iso_now(CFG.tzinfo()))
+        params.append(tx_id)
+        db_exec(f"UPDATE transactions SET {', '.join(fields)} WHERE id=?;", tuple(params))
+    if body.tag_ids is not None:
+        set_transaction_tags(tx_id, body.tag_ids)
+    after = db_fetchone("SELECT * FROM transactions WHERE id=?;", (tx_id,))
+    log_audit(int(u["id"]), "UPDATE", "transaction", tx_id, dict(before), dict(after) if after else None)
+    return ok({"updated": True})
+
+
+@APP.post("/api/transactions/{tx_id}/post")
+def post_transaction(
+        tx_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM transactions WHERE id=?;", (tx_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    payload = dict(before)
+    validate_transaction_payload(payload, "posted")
+    ensure_month_unlocked(before["date"], u["role"])
+    db_exec(
+        "UPDATE transactions SET status='posted', updated_by=?, updated_at=? WHERE id=?;",
+        (int(u["id"]), iso_now(CFG.tzinfo()), tx_id),
+    )
+    after = db_fetchone("SELECT * FROM transactions WHERE id=?;", (tx_id,))
+    log_audit(int(u["id"]), "POST", "transaction", tx_id, dict(before), dict(after) if after else None)
+    return ok({"posted": True})
+
+
+@APP.post("/api/transactions/{tx_id}/void")
+def void_transaction(
+        tx_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM transactions WHERE id=?;", (tx_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if before["status"] == "posted":
+        ensure_month_unlocked(before["date"], u["role"])
+    db_exec(
+        "UPDATE transactions SET status='void', updated_by=?, updated_at=? WHERE id=?;",
+        (int(u["id"]), iso_now(CFG.tzinfo()), tx_id),
+    )
+    after = db_fetchone("SELECT * FROM transactions WHERE id=?;", (tx_id,))
+    log_audit(int(u["id"]), "VOID", "transaction", tx_id, dict(before), dict(after) if after else None)
+    return ok({"voided": True})
+
+
+@APP.post("/api/transactions/{tx_id}/tags")
+def set_tags_for_transaction(
+        tx_id: int,
+        body: TransactionTagsIn,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    tx = db_fetchone("SELECT * FROM transactions WHERE id=?;", (tx_id,))
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if tx["status"] == "posted":
+        ensure_month_unlocked(tx["date"], u["role"])
+    set_transaction_tags(tx_id, body.tag_ids)
+    return ok({"updated": True})
+
+
+@APP.post("/api/transactions/{tx_id}/attachments")
+async def upload_attachment(
+        tx_id: int,
+        file: UploadFile = File(...),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    tx = db_fetchone("SELECT * FROM transactions WHERE id=?;", (tx_id,))
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if tx["status"] == "posted":
+        ensure_month_unlocked(tx["date"], u["role"])
+    allowed = {"image/jpeg", "image/png", "application/pdf"}
+    if file.content_type not in allowed:
+        raise HTTPException(status_code=400, detail="Недопустимый формат файла")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Файл слишком большой")
+    count = db_fetchone(
+        "SELECT COUNT(*) AS c FROM attachments WHERE transaction_id=? AND is_deleted=0;", (tx_id,)
+    )["c"]
+    if int(count) >= 10:
+        raise HTTPException(status_code=400, detail="Достигнут лимит вложений")
+    sha = hashlib.sha256(data).hexdigest()
+    dup = db_fetchone(
+        "SELECT id FROM attachments WHERE transaction_id=? AND sha256=? AND is_deleted=0;",
+        (tx_id, sha),
+    )
+    if dup:
+        return ok({"id": int(dup["id"]), "duplicate": True})
+    now = iso_now(CFG.tzinfo())
+    filename = f"{tx_id}_{int(time.time())}_{file.filename}"
+    storage_path = str(UPLOAD_DIR / filename)
+    with open(storage_path, "wb") as f:
+        f.write(data)
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO attachments (
+            transaction_id, file_name, mime_type, size_bytes, storage_path,
+            sha256, preview_path, uploaded_by, uploaded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?);
+        """,
+        (
+            tx_id,
+            file.filename,
+            file.content_type,
+            len(data),
+            storage_path,
+            sha,
+            int(u["id"]),
+            now,
+        ),
+    )
+    log_audit(int(u["id"]), "CREATE", "attachment", int(new_id), None, {"transaction_id": tx_id})
+    return ok({"id": new_id, "duplicate": False})
+
+
+@APP.get("/api/transactions/{tx_id}/attachments")
+def list_attachments(
+        tx_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    rows = db_fetchall(
+        "SELECT * FROM attachments WHERE transaction_id=? AND is_deleted=0 ORDER BY id ASC;", (tx_id,)
+    )
+    return ok([dict(r) for r in rows])
+
+
+@APP.get("/api/attachments/{attach_id}")
+def get_attachment(
+        attach_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    row = db_fetchone("SELECT * FROM attachments WHERE id=? AND is_deleted=0;", (attach_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return FileResponse(row["storage_path"], media_type=row["mime_type"], filename=row["file_name"])
+
+
+@APP.delete("/api/attachments/{attach_id}")
+def delete_attachment(
+        attach_id: int,
+        reason: Optional[str] = Query(default=None),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    row = db_fetchone("SELECT * FROM attachments WHERE id=? AND is_deleted=0;", (attach_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    tx = db_fetchone("SELECT * FROM transactions WHERE id=?;", (row["transaction_id"],))
+    if tx and tx["status"] == "posted":
+        ensure_month_unlocked(tx["date"], u["role"])
+    now = iso_now(CFG.tzinfo())
+    db_exec(
+        """
+        UPDATE attachments
+        SET is_deleted=1, deleted_by=?, deleted_at=?, delete_reason=?
+        WHERE id=?;
+        """,
+        (int(u["id"]), now, reason, attach_id),
+    )
+    log_audit(int(u["id"]), "DELETE", "attachment", attach_id, dict(row), None)
+    return ok({"deleted": True})
+
+
+@APP.get("/api/budgets")
+def list_budgets(
+        month: str = Query(...),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    rows = db_fetchall(
+        """
+        SELECT b.*, c.name AS category_name
+        FROM budgets b
+        JOIN categories c ON c.id=b.category_id
+        WHERE b.month=?
+        ORDER BY c.name ASC;
+        """,
+        (month,),
+    )
+    return ok([dict(r) for r in rows])
+
+
+@APP.post("/api/budgets")
+def create_budget(
+        body: BudgetIn,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    now = iso_now(CFG.tzinfo())
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO budgets (
+            month, category_id, amount, currency, warning_threshold_1, warning_threshold_2,
+            created_at, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """,
+        (
+            body.month,
+            body.category_id,
+            float(body.amount),
+            body.currency,
+            float(body.warning_threshold_1),
+            float(body.warning_threshold_2),
+            now,
+            int(u["id"]),
+        ),
+    )
+    log_audit(int(u["id"]), "CREATE", "budget", int(new_id), None, {"month": body.month})
+    return ok({"id": new_id})
+
+
+@APP.patch("/api/budgets/{budget_id}")
+def update_budget(
+        budget_id: int,
+        body: BudgetUpdateIn,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM budgets WHERE id=?;", (budget_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    fields = []
+    params: List[Any] = []
+    if body.amount is not None:
+        fields.append("amount=?")
+        params.append(float(body.amount))
+    if body.currency is not None:
+        fields.append("currency=?")
+        params.append(body.currency)
+    if body.warning_threshold_1 is not None:
+        fields.append("warning_threshold_1=?")
+        params.append(float(body.warning_threshold_1))
+    if body.warning_threshold_2 is not None:
+        fields.append("warning_threshold_2=?")
+        params.append(float(body.warning_threshold_2))
+    if not fields:
+        return ok({"updated": False})
+    fields.append("updated_at=?")
+    fields.append("updated_by=?")
+    params.append(iso_now(CFG.tzinfo()))
+    params.append(int(u["id"]))
+    params.append(budget_id)
+    db_exec(f"UPDATE budgets SET {', '.join(fields)} WHERE id=?;", tuple(params))
+    after = db_fetchone("SELECT * FROM budgets WHERE id=?;", (budget_id,))
+    log_audit(int(u["id"]), "UPDATE", "budget", budget_id, dict(before), dict(after) if after else None)
+    return ok({"updated": True})
+
+
+@APP.get("/api/reports/budget")
+def report_budget(
+        month: str = Query(...),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    rows = db_fetchall(
+        """
+        SELECT b.id, b.month, b.amount AS plan, b.currency, b.warning_threshold_1, b.warning_threshold_2,
+            c.id AS category_id, c.name AS category_name
+        FROM budgets b
+        JOIN categories c ON c.id=b.category_id
+        WHERE b.month=?
+        ORDER BY c.name ASC;
+        """,
+        (month,),
+    )
+    out = []
+    for row in rows:
+        actual = float(
+            db_fetchone(
+                """
+                SELECT COALESCE(SUM(amount),0) AS s
+                FROM transactions
+                WHERE status='posted' AND type='expense' AND category_id=?
+                    AND substr(date,1,7)=?;
+                """,
+                (row["category_id"], month),
+            )["s"]
+        )
+        plan = float(row["plan"])
+        if plan > 0:
+            progress = actual / plan
+            variance_pct = (actual - plan) / plan * 100
+        else:
+            progress = 1.0 if actual > 0 else 0.0
+            variance_pct = None
+        out.append(
+            {
+                "budget_id": row["id"],
+                "month": month,
+                "category_id": row["category_id"],
+                "category_name": row["category_name"],
+                "plan": plan,
+                "actual": round(actual, 2),
+                "variance": round(actual - plan, 2),
+                "variance_pct": variance_pct,
+                "progress": round(progress, 4),
+                "currency": row["currency"],
+                "warning_threshold_1": row["warning_threshold_1"],
+                "warning_threshold_2": row["warning_threshold_2"],
+            }
+        )
+    return ok(out)
+
+
+@APP.get("/api/month-locks")
+def list_month_locks(u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer"))):
+    rows = db_fetchall("SELECT * FROM month_locks ORDER BY month DESC;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.post("/api/month-locks/lock")
+def lock_month(
+        body: MonthLockIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    now = iso_now(CFG.tzinfo())
+    db_exec(
+        """
+        INSERT INTO month_locks (month, locked_at, locked_by, comment)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(month) DO UPDATE SET locked_at=excluded.locked_at, locked_by=excluded.locked_by,
+            comment=excluded.comment, unlocked_at=NULL, unlocked_by=NULL, unlock_reason=NULL;
+        """,
+        (body.month, now, int(u["id"]), body.comment),
+    )
+    log_audit(int(u["id"]), "LOCK", "month", None, None, {"month": body.month})
+    return ok({"locked": True})
+
+
+@APP.post("/api/month-locks/unlock")
+def unlock_month(
+        body: MonthUnlockIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    now = iso_now(CFG.tzinfo())
+    db_exec(
+        """
+        UPDATE month_locks
+        SET unlocked_at=?, unlocked_by=?, unlock_reason=?
+        WHERE month=?;
+        """,
+        (now, int(u["id"]), body.reason, body.month),
+    )
+    log_audit(int(u["id"]), "UNLOCK", "month", None, None, {"month": body.month, "reason": body.reason})
+    return ok({"unlocked": True})
+
+
+@APP.get("/api/reports/summary")
+def report_summary(
+        period_type: str = Query(...),
+        period: str = Query(...),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    if period_type not in ("month", "quarter", "year"):
+        raise HTTPException(status_code=400, detail="Invalid period_type")
+    if period_type == "month":
+        start = dt.date.fromisoformat(f"{period}-01")
+        end = last_day_of_month(start.year, start.month)
+        prev_month = start.month - 1 or 12
+        prev_year = start.year - 1 if start.month == 1 else start.year
+        prev_start = dt.date(prev_year, prev_month, 1)
+        prev_end = last_day_of_month(prev_year, prev_month)
+    elif period_type == "year":
+        start = dt.date(int(period), 1, 1)
+        end = dt.date(int(period), 12, 31)
+        prev_start = dt.date(int(period) - 1, 1, 1)
+        prev_end = dt.date(int(period) - 1, 12, 31)
+    else:
+        year_str, q_str = period.split("-Q")
+        year = int(year_str)
+        q = int(q_str)
+        month_start = 1 + (q - 1) * 3
+        start = dt.date(year, month_start, 1)
+        end = last_day_of_month(year, month_start + 2)
+        prev_q = q - 1
+        prev_year = year
+        if prev_q == 0:
+            prev_q = 4
+            prev_year -= 1
+        prev_start = dt.date(prev_year, 1 + (prev_q - 1) * 3, 1)
+        prev_end = last_day_of_month(prev_year, 1 + (prev_q - 1) * 3 + 2)
+
+    def sum_amount(tx_type: str, date_from: dt.date, date_to: dt.date) -> float:
+        row = db_fetchone(
+            """
+            SELECT COALESCE(SUM(amount),0) AS s
+            FROM transactions
+            WHERE status='posted' AND type=? AND date BETWEEN ? AND ?;
+            """,
+            (tx_type, date_from.isoformat(), date_to.isoformat()),
+        )
+        return float(row["s"])
+
+    income = sum_amount("income", start, end)
+    expense = sum_amount("expense", start, end)
+    prev_income = sum_amount("income", prev_start, prev_end)
+    prev_expense = sum_amount("expense", prev_start, prev_end)
+    net = income - expense
+    prev_net = prev_income - prev_expense
+
+    def delta_pct(cur: float, prev: float) -> Optional[float]:
+        if prev == 0:
+            return None
+        return (cur - prev) / abs(prev) * 100
+
+    return ok(
+        {
+            "period": {"type": period_type, "value": period},
+            "income": income,
+            "expense": expense,
+            "net": net,
+            "prev": {"income": prev_income, "expense": prev_expense, "net": prev_net},
+            "delta": {
+                "income": income - prev_income,
+                "expense": expense - prev_expense,
+                "net": net - prev_net,
+            },
+            "delta_pct": {
+                "income": delta_pct(income, prev_income),
+                "expense": delta_pct(expense, prev_expense),
+                "net": delta_pct(net, prev_net),
+            },
+        }
+    )
+
+
+@APP.get("/api/reports/cashflow")
+def report_cashflow(
+        period_type: str = Query(...),
+        period: str = Query(...),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    if period_type not in ("month", "quarter", "year"):
+        raise HTTPException(status_code=400, detail="Invalid period_type")
+    if period_type == "month":
+        start = dt.date.fromisoformat(f"{period}-01")
+        end = last_day_of_month(start.year, start.month)
+    elif period_type == "year":
+        start = dt.date(int(period), 1, 1)
+        end = dt.date(int(period), 12, 31)
+    else:
+        year_str, q_str = period.split("-Q")
+        year = int(year_str)
+        q = int(q_str)
+        month_start = 1 + (q - 1) * 3
+        start = dt.date(year, month_start, 1)
+        end = last_day_of_month(year, month_start + 2)
+
+    def sum_for_account(account_id: int, date_from: str, date_to: str, tx_type: str, col: str) -> float:
+        row = db_fetchone(
+            f"""
+                SELECT COALESCE(SUM(amount),0) AS s
+                FROM transactions
+                WHERE status='posted' AND type=? AND {col}=? AND date BETWEEN ? AND ?;
+                """,
+            (tx_type, account_id, date_from, date_to),
+        )
+        return float(row["s"])
+
+    accounts = db_fetchall("SELECT * FROM accounts WHERE is_active=1 ORDER BY name ASC;")
+    out = []
+    for a in accounts:
+        acc_id = int(a["id"])
+        start_iso = start.isoformat()
+        end_iso = end.isoformat()
+        income = sum_for_account(acc_id, start_iso, end_iso, "income", "account_id")
+        expense = sum_for_account(acc_id, start_iso, end_iso, "expense", "account_id")
+        transfer_in = sum_for_account(acc_id, start_iso, end_iso, "transfer", "to_account_id")
+        transfer_out = sum_for_account(acc_id, start_iso, end_iso, "transfer", "from_account_id")
+        inflow = income + transfer_in
+        outflow = expense + transfer_out
+
+        opening = float(a["opening_balance"] or 0.0)
+        pre_income = sum_for_account(acc_id, "1900-01-01", (start - dt.timedelta(days=1)).isoformat(), "income",
+                                     "account_id")
+        pre_expense = sum_for_account(acc_id, "1900-01-01", (start - dt.timedelta(days=1)).isoformat(), "expense",
+                                      "account_id")
+        pre_in_transfer = sum_for_account(
+            acc_id, "1900-01-01", (start - dt.timedelta(days=1)).isoformat(), "transfer", "to_account_id"
+        )
+        pre_out_transfer = sum_for_account(
+            acc_id, "1900-01-01", (start - dt.timedelta(days=1)).isoformat(), "transfer", "from_account_id"
+        )
+        opening_balance = opening + pre_income + pre_in_transfer - pre_expense - pre_out_transfer
+        closing = opening_balance + inflow - outflow
+        out.append(
+            {
+                "account_id": acc_id,
+                "account_name": a["name"],
+                "opening": round(opening_balance, 2),
+                "inflow": round(inflow, 2),
+                "outflow": round(outflow, 2),
+                "closing": round(closing, 2),
+            }
+        )
+    return ok(out)
+
+
+@APP.get("/api/notification-settings")
+def list_notification_settings(u: sqlite3.Row = Depends(require_role("admin"))):
+    rows = db_fetchall("SELECT * FROM notification_settings ORDER BY id ASC;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.patch("/api/notification-settings/{setting_id}")
+def update_notification_settings(
+        setting_id: int,
+        body: Dict[str, Any],
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    before = db_fetchone("SELECT * FROM notification_settings WHERE id=?;", (setting_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    fields = []
+    params: List[Any] = []
+    if "is_enabled" in body:
+        fields.append("is_enabled=?")
+        params.append(1 if body["is_enabled"] else 0)
+    if "params_json" in body:
+        fields.append("params_json=?")
+        params.append(json.dumps(body["params_json"], ensure_ascii=False))
+    if "chat_targets_json" in body:
+        fields.append("chat_targets_json=?")
+        params.append(json.dumps(body["chat_targets_json"], ensure_ascii=False))
+    if not fields:
+        return ok({"updated": False})
+    fields.append("updated_at=?")
+    fields.append("updated_by=?")
+    params.append(iso_now(CFG.tzinfo()))
+    params.append(int(u["id"]))
+    params.append(setting_id)
+    db_exec(f"UPDATE notification_settings SET {', '.join(fields)} WHERE id=?;", tuple(params))
+    after = db_fetchone("SELECT * FROM notification_settings WHERE id=?;", (setting_id,))
+    log_audit(int(u["id"]), "UPDATE", "notification_setting", setting_id, dict(before), dict(after) if after else None)
+    return ok({"updated": True})
+
+
+@APP.get("/api/notifications")
+def list_notifications(
+        status: Optional[str] = Query(default=None),
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    if status:
+        rows = db_fetchall(
+            "SELECT * FROM notifications WHERE status=? ORDER BY created_at DESC;", (status,)
+        )
+    else:
+        rows = db_fetchall("SELECT * FROM notifications ORDER BY created_at DESC;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.post("/api/backups/run")
+def run_backup(u: sqlite3.Row = Depends(require_role("admin"))):
+    now = iso_now(CFG.tzinfo())
+    backup_dir = BASE_DIR / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"backup_{now.replace(':', '-')}.zip"
+    path = backup_dir / filename
+    status = "ok"
+    error_text = None
+    sha = None
+    try:
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(CFG.DB_PATH, arcname="db.sqlite3")
+            if UPLOAD_DIR.exists():
+                for root, _, files in os.walk(UPLOAD_DIR):
+                    for f in files:
+                        p = Path(root) / f
+                        zf.write(p, arcname=str(Path("uploads") / p.relative_to(UPLOAD_DIR)))
+        data = path.read_bytes()
+        sha = hashlib.sha256(data).hexdigest()
+    except Exception as exc:
+        status = "failed"
+        error_text = str(exc)
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO backups (created_at, created_by, kind, file_path, size_bytes, sha256, status, error_text)
+        VALUES (?, ?, 'manual', ?, ?, ?, ?, ?);
+        """,
+        (now, int(u["id"]), str(path), path.stat().st_size if path.exists() else 0, sha, status, error_text),
+    )
+    log_audit(int(u["id"]), "CREATE", "backup", int(new_id), None, {"status": status})
+    if status != "ok":
+        raise HTTPException(status_code=500, detail="Backup failed")
+    return ok({"id": new_id})
+
+
+@APP.get("/api/backups")
+def list_backups(u: sqlite3.Row = Depends(require_role("admin"))):
+    rows = db_fetchall("SELECT * FROM backups ORDER BY created_at DESC;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.get("/api/backups/{backup_id}/download")
+def download_backup(
+        backup_id: int,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    row = db_fetchone("SELECT * FROM backups WHERE id=?;", (backup_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return FileResponse(row["file_path"], filename=Path(row["file_path"]).name, media_type="application/zip")
+
+
+@APP.post("/api/backups/restore")
+async def restore_backup(
+        file: UploadFile = File(...),
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    now = iso_now(CFG.tzinfo())
+    # pre-restore backup
+    run_backup(u)
+    data = await file.read()
+    buf = BytesIO(data)
+    with zipfile.ZipFile(buf) as zf:
+        if "db.sqlite3" not in zf.namelist():
+            raise HTTPException(status_code=400, detail="Invalid backup structure")
+        zf.extract("db.sqlite3", path=BASE_DIR)
+        for name in zf.namelist():
+            if name.startswith("uploads/"):
+                target = BASE_DIR / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(name) as src, open(target, "wb") as dst:
+                    dst.write(src.read())
+    log_audit(int(u["id"]), "RESTORE", "backup", None, None, {"file": file.filename, "at": now})
+    return ok({"restored": True})
+
+
+@APP.get("/api/monitor/errors")
+def monitor_errors(u: sqlite3.Row = Depends(require_role("admin"))):
+    rows = db_fetchall("SELECT * FROM error_logs ORDER BY occurred_at DESC LIMIT 200;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.get("/api/monitor/jobs")
+def monitor_jobs(u: sqlite3.Row = Depends(require_role("admin"))):
+    rows = db_fetchall("SELECT * FROM job_runs ORDER BY started_at DESC LIMIT 200;")
+    return ok([dict(r) for r in rows])
+
+
+@APP.get("/api/monitor/delivery")
+def monitor_delivery(u: sqlite3.Row = Depends(require_role("admin"))):
+    rows = db_fetchall("SELECT * FROM telegram_delivery_logs ORDER BY id DESC LIMIT 200;")
+    return ok([dict(r) for r in rows])
 
 
 # ---------------------------
@@ -2443,4 +4011,6 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
+
+
 
