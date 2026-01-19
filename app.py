@@ -1,0 +1,2724 @@
+# app.py
+# FastAPI API + планировщик отчётов + aiogram bot (единое приложение)
+# По ТЗ: SQLite, allowlist (users.json), роли, Telegram WebApp auth (initData), расчёты как Excel.
+
+from __future__ import annotations
+
+import asyncio
+import calendar
+import dataclasses
+import datetime as dt
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import sqlite3
+import time
+import traceback
+import urllib.parse
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional, Tuple
+
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from zoneinfo import ZoneInfo
+
+# aiogram v3
+from aiogram import Bot, Dispatcher, Router, F
+from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    WebAppInfo,
+)
+
+# Optional for Excel export
+try:
+    import openpyxl
+    from openpyxl.utils import get_column_letter
+except Exception:  # pragma: no cover
+    openpyxl = None
+
+from pathlib import Path
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
+ATTACHMENTS_DIR = BASE_DIR / "uploads" / "receipts"
+ALLOWED_ATTACHMENT_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/pdf",
+}
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+MAX_ATTACHMENTS_PER_EXPENSE = 10
+
+# ---------------------------
+# Config
+# ---------------------------
+
+@dataclasses.dataclass
+class Config:
+    BOT_TOKEN: str
+    APP_URL: str
+    WEBAPP_URL: str
+    DB_PATH: str
+    USERS_JSON_PATH: str
+    SESSION_SECRET: str
+    TZ: str
+
+    def tzinfo(self) -> ZoneInfo:
+        try:
+            return ZoneInfo(self.TZ)
+        except Exception:
+            return ZoneInfo("Europe/Warsaw")
+
+
+def load_config() -> Config:
+    bot_token = os.getenv("BOT_TOKEN", "").strip()
+    if not bot_token:
+        raise RuntimeError("BOT_TOKEN is required in .env / environment")
+
+    return Config(
+        BOT_TOKEN=bot_token,
+        APP_URL=os.getenv("APP_URL", "http://localhost:8000").strip(),
+        WEBAPP_URL=os.getenv("WEBAPP_URL", "http://localhost:8000/webapp").strip(),
+        DB_PATH=os.getenv("DB_PATH", "db.sqlite3").strip(),
+        USERS_JSON_PATH=os.getenv("USERS_JSON", "users.json").strip(),
+        SESSION_SECRET=os.getenv("SESSION_SECRET", secrets.token_urlsafe(32)).strip(),
+        TZ=os.getenv("TIMEZONE", "Europe/Warsaw").strip(),
+    )
+
+
+CFG = load_config()
+
+
+# ---------------------------
+# DB helpers (sqlite3)
+# ---------------------------
+
+def db_connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(CFG.DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON;")
+    return conn
+
+
+def db_exec(sql: str, params: Tuple[Any, ...] = ()) -> None:
+    with db_connect() as conn:
+        conn.execute(sql, params)
+        conn.commit()
+
+
+def db_exec_returning_id(sql: str, params: Tuple[Any, ...] = ()) -> int:
+    with db_connect() as conn:
+        cur = conn.execute(sql, params)
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def db_fetchone(sql: str, params: Tuple[Any, ...] = ()) -> Optional[sqlite3.Row]:
+    with db_connect() as conn:
+        cur = conn.execute(sql, params)
+        return cur.fetchone()
+
+
+def db_fetchall(sql: str, params: Tuple[Any, ...] = ()) -> List[sqlite3.Row]:
+    with db_connect() as conn:
+        cur = conn.execute(sql, params)
+        return cur.fetchall()
+
+
+def table_has_column(table: str, col: str) -> bool:
+    rows = db_fetchall(f"PRAGMA table_info({table});")
+    return any(r["name"] == col for r in rows)
+
+
+def init_db() -> None:
+    # users
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            name TEXT,
+            role TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+        """
+    )
+    # months
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS months (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            monthly_min_needed REAL NOT NULL DEFAULT 0,
+            start_balance REAL NOT NULL DEFAULT 0,
+            sundays_override INTEGER NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(year, month)
+        );
+        """
+    )
+    # services
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS services (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_id INTEGER NOT NULL,
+            service_date TEXT NOT NULL,
+            idx INTEGER NOT NULL,
+            cashless REAL NOT NULL DEFAULT 0,
+            cash REAL NOT NULL DEFAULT 0,
+            total REAL NOT NULL DEFAULT 0,
+            weekly_min_needed REAL NOT NULL DEFAULT 0,
+            mnsps_status TEXT NOT NULL DEFAULT 'Не собрана',
+            pvs_ratio REAL NOT NULL DEFAULT 0,
+            income_type TEXT NOT NULL DEFAULT 'donation',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(month_id, service_date),
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+        );
+        """
+    )
+    # expenses
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_id INTEGER NOT NULL,
+            expense_date TEXT NOT NULL,
+            category TEXT NOT NULL,
+            title TEXT NOT NULL,
+            qty REAL NOT NULL DEFAULT 1,
+            unit_amount REAL NOT NULL DEFAULT 0,
+            total REAL NOT NULL DEFAULT 0,
+            comment TEXT,
+            is_system INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+        );
+        """
+    )
+    # settings (single row is fine)
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_chat_id INTEGER,
+            sunday_report_time TEXT NOT NULL DEFAULT '18:00',
+            month_report_time TEXT NOT NULL DEFAULT '21:00',
+            timezone TEXT NOT NULL DEFAULT 'Europe/Warsaw',
+            ui_theme TEXT NOT NULL DEFAULT 'auto',
+            daily_expenses_enabled INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    # bot subscribers (anyone who started bot can receive reports)
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS bot_subscribers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    # audit_log␊
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER,
+            before_json TEXT,
+            after_json TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+        """
+    )
+    # attachments
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER NOT NULL,
+            orig_filename TEXT NOT NULL,
+            stored_filename TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            sha256 TEXT NOT NULL,
+            created_by_user_id INTEGER NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+        """
+    )
+    db_exec(
+        "CREATE INDEX IF NOT EXISTS idx_attach_entity ON attachments(entity_type, entity_id);"
+    )
+    db_exec(
+        "CREATE INDEX IF NOT EXISTS idx_attach_created ON attachments(created_at);"
+    )
+
+    # Ensure settings row exists (id=1)
+    row = db_fetchone("SELECT * FROM settings ORDER BY id LIMIT 1;")
+    if not row:
+        now = iso_now(CFG.tzinfo())
+        db_exec(
+            """
+            INSERT INTO settings (
+                report_chat_id, sunday_report_time, month_report_time,
+                timezone, ui_theme, daily_expenses_enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (None, "18:00", "21:00", CFG.TZ, "auto", 0, now, now),
+        )
+
+    if not table_has_column("services", "income_type"):
+        db_exec("ALTER TABLE services ADD COLUMN income_type TEXT NOT NULL DEFAULT 'donation';")
+    db_exec("UPDATE services SET income_type='donation' WHERE income_type IS NULL OR income_type='';")
+
+
+def iso_now(tz: ZoneInfo) -> str:
+    return dt.datetime.now(tz=tz).replace(microsecond=0).isoformat()
+
+
+def iso_date(d: dt.date) -> str:
+    return d.isoformat()
+
+
+def parse_iso_date(s: str) -> dt.date:
+    return dt.date.fromisoformat(s)
+
+
+def is_month_closed(month_id: int) -> bool:
+    if table_has_column("months", "is_closed"):
+        row = db_fetchone("SELECT is_closed FROM months WHERE id=?;", (month_id,))
+        return bool(row and int(row["is_closed"] or 0) == 1)
+    if table_has_column("months", "closed_at"):
+        row = db_fetchone("SELECT closed_at FROM months WHERE id=?;", (month_id,))
+        return bool(row and row["closed_at"])
+    return False
+
+
+def ensure_month_open(month_id: int) -> None:
+    if is_month_closed(month_id):
+        raise HTTPException(status_code=403, detail="Month is closed")
+
+
+def get_expense_or_404(expense_id: int) -> sqlite3.Row:
+    row = db_fetchone("SELECT * FROM expenses WHERE id=?;", (expense_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    return row
+
+
+def get_attachment_or_404(attachment_id: int) -> sqlite3.Row:
+    row = db_fetchone("SELECT * FROM attachments WHERE id=?;", (attachment_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return row
+
+
+def attachment_storage_dir(entity_id: int, created_at: str) -> Path:
+    try:
+        created_dt = dt.datetime.fromisoformat(created_at)
+    except ValueError:
+        created_dt = dt.datetime.now(tz=CFG.tzinfo())
+    ym = f"{created_dt.year}-{created_dt.month:02d}"
+    return ATTACHMENTS_DIR / ym / str(entity_id)
+
+
+def attachment_extension(orig_filename: str, mime: str) -> str:
+    ext = Path(orig_filename or "").suffix.lower()
+    if ext:
+        return ext
+    return {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "application/pdf": ".pdf",
+    }.get(mime, "")
+
+
+# ---------------------------
+# Allowlist (users.json) + sync to DB
+# ---------------------------
+
+ALLOWLIST_CACHE: Dict[int, Dict[str, Any]] = {}
+ALLOWLIST_MTIME: Optional[float] = None
+
+
+def load_allowlist() -> Dict[int, Dict[str, Any]]:
+    """
+    users.json:
+    [
+      {"telegram_id": 123, "name": "Иван", "role": "admin", "active": true},
+      ...
+    ]
+    """
+    path = CFG.USERS_JSON_PATH
+    if not os.path.exists(path):
+        # пустой allowlist = никого не пускаем
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    out: Dict[int, Dict[str, Any]] = {}
+    for item in data:
+        try:
+            tid = int(item["telegram_id"])
+            out[tid] = {
+                "telegram_id": tid,
+                "name": str(item.get("name", "")).strip(),
+                "role": str(item.get("role", "viewer")).strip(),
+                "active": bool(item.get("active", True)),
+            }
+        except Exception:
+            continue
+    return out
+
+
+def sync_allowlist_to_db(allow: Dict[int, Dict[str, Any]]) -> None:
+    now = iso_now(CFG.tzinfo())
+    for tid, u in allow.items():
+        existing = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (tid,))
+        if not existing:
+            db_exec(
+                """
+                INSERT INTO users (telegram_id, name, role, active, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (tid, u.get("name"), u.get("role", "viewer"), 1 if u.get("active", True) else 0, now),
+            )
+        else:
+            db_exec(
+                """
+                UPDATE users SET name=?, role=?, active=?
+                WHERE telegram_id=?;
+                """,
+                (u.get("name"), u.get("role", existing["role"]), 1 if u.get("active", True) else 0, tid),
+            )
+
+def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
+    global ALLOWLIST_CACHE, ALLOWLIST_MTIME
+    path = CFG.USERS_JSON_PATH
+    try:
+        mtime = os.path.getmtime(path)
+    except FileNotFoundError:
+        mtime = None
+    if mtime != ALLOWLIST_MTIME:
+        allow = load_allowlist()
+        sync_allowlist_to_db(allow)
+        ALLOWLIST_CACHE = allow
+        ALLOWLIST_MTIME = mtime
+        return ALLOWLIST_CACHE
+    return ALLOWLIST_CACHE
+
+def register_bot_subscriber(telegram_id: int) -> None:
+    now = iso_now(CFG.tzinfo())
+    existing = db_fetchone("SELECT * FROM bot_subscribers WHERE telegram_id=?;", (telegram_id,))
+    if not existing:
+        db_exec(
+            """
+            INSERT INTO bot_subscribers (telegram_id, active, created_at, updated_at)
+            VALUES (?, 1, ?, ?);
+            """,
+            (telegram_id, now, now),
+        )
+        return
+    db_exec(
+        """
+        UPDATE bot_subscribers SET active=1, updated_at=?
+        WHERE telegram_id=?;
+        """,
+        (now, telegram_id),
+    )
+
+def list_report_recipients(settings_row: Optional[sqlite3.Row] = None) -> List[int]:
+    s = settings_row or get_settings()
+    ids: set[int] = set()
+    chat_id = s["report_chat_id"]
+    if chat_id:
+        ids.add(int(chat_id))
+    allow = refresh_allowlist_if_needed()
+    allowed_ids = {tid for tid, u in allow.items() if u.get("active") is True}
+    if allowed_ids:
+        placeholders = ",".join("?" for _ in allowed_ids)
+        rows = db_fetchall(
+            f"""
+            SELECT telegram_id
+            FROM bot_subscribers
+            WHERE active=1
+              AND telegram_id IN ({placeholders});
+            """,
+            tuple(allowed_ids),
+        )
+    else:
+        rows = []
+    ids.update(int(r["telegram_id"]) for r in rows)
+    return sorted(ids)
+# ---------------------------
+# Session token (HMAC signed JSON) - self-contained (no external JWT deps)
+# ---------------------------
+
+
+def _b64url_encode(raw: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(s: str) -> bytes:
+    import base64
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
+def make_session_token(payload: Dict[str, Any], secret: str) -> str:
+    payload_bytes = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = _b64url_encode(payload_bytes)
+    sig = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).digest()
+    return f"{body}.{_b64url_encode(sig)}"
+
+
+def verify_session_token(token: str, secret: str) -> Dict[str, Any]:
+    try:
+        body, sig = token.split(".", 1)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid token format")
+
+    expected = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).digest()
+    if not hmac.compare_digest(_b64url_decode(sig), expected):
+        raise HTTPException(status_code=401, detail="Invalid token signature")
+
+    payload = json.loads(_b64url_decode(body).decode("utf-8"))
+    exp = int(payload.get("exp", 0))
+    if exp and int(time.time()) > exp:
+        raise HTTPException(status_code=401, detail="Token expired")
+    return payload
+
+
+# ---------------------------
+# Telegram WebApp initData validation
+# ---------------------------
+
+def validate_telegram_init_data(init_data: str, bot_token: str, max_age_sec: int = 7 * 24 * 3600) -> Dict[str, Any]:
+    """
+    Telegram WebApp initData verification:
+    - Parse query string
+    - Exclude 'hash'
+    - data_check_string = '\n'.join(sorted([f"{k}={v}"]))
+    - secret_key = HMAC_SHA256(key=b"WebAppData", msg=bot_token)
+    - check_hash = HMAC_SHA256(key=secret_key, msg=data_check_string).hexdigest()
+    """
+    if not init_data:
+        raise HTTPException(status_code=400, detail="initData is required")
+
+    parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+    received_hash = parsed.get("hash")
+    if not received_hash:
+        raise HTTPException(status_code=401, detail="Missing hash in initData")
+
+    # auth_date freshness (optional but recommended)
+    try:
+        auth_date = int(parsed.get("auth_date", "0"))
+        if auth_date and (int(time.time()) - auth_date) > max_age_sec:
+            raise HTTPException(status_code=401, detail="initData is too old")
+    except ValueError:
+        pass
+
+    data_pairs = []
+    for k, v in parsed.items():
+        if k == "hash":
+            continue
+        data_pairs.append(f"{k}={v}")
+    data_pairs.sort()
+    data_check_string = "\n".join(data_pairs)
+
+    secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
+    computed_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(computed_hash, received_hash):
+        raise HTTPException(status_code=401, detail="initData validation failed")
+
+    # Extract user (JSON string)
+    user_raw = parsed.get("user")
+    if not user_raw:
+        raise HTTPException(status_code=401, detail="No user in initData")
+
+    try:
+        user_obj = json.loads(user_raw)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user payload in initData")
+
+    return user_obj
+
+
+# ---------------------------
+# Domain calculations (Excel logic)
+# ---------------------------
+
+def count_sundays_in_month(year: int, month: int) -> int:
+    c = calendar.Calendar(firstweekday=0)  # Monday is 0; doesn't matter
+    sundays = 0
+    for d in c.itermonthdates(year, month):
+        if d.month == month and d.weekday() == 6:
+            sundays += 1
+    return sundays
+
+
+def last_day_of_month(year: int, month: int) -> dt.date:
+    last = calendar.monthrange(year, month)[1]
+    return dt.date(year, month, last)
+
+
+def get_settings() -> sqlite3.Row:
+    row = db_fetchone("SELECT * FROM settings ORDER BY id LIMIT 1;")
+    if not row:
+        raise HTTPException(status_code=500, detail="Settings not initialized")
+    return row
+
+
+def get_month_by_id(month_id: int) -> sqlite3.Row:
+    m = db_fetchone("SELECT * FROM months WHERE id=?;", (month_id,))
+    if not m:
+        raise HTTPException(status_code=404, detail="Month not found")
+    return m
+
+
+def get_or_create_month(year: int, month: int) -> sqlite3.Row:
+    m = db_fetchone("SELECT * FROM months WHERE year=? AND month=?;", (year, month))
+    if m:
+        return m
+
+    # start_balance from previous month fact_balance
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    prev_y, prev_m = year, month - 1
+    if prev_m == 0:
+        prev_m = 12
+        prev_y -= 1
+
+    prev = db_fetchone("SELECT * FROM months WHERE year=? AND month=?;", (prev_y, prev_m))
+    start_balance = 0.0
+    if prev:
+        prev_summary = compute_month_summary(prev["id"], ensure_tithe=True)
+        start_balance = float(prev_summary["fact_balance"])
+
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO months (year, month, monthly_min_needed, start_balance, sundays_override, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """,
+        (year, month, 0.0, float(start_balance), None, now, now),
+    )
+    m2 = db_fetchone("SELECT * FROM months WHERE id=?;", (new_id,))
+    assert m2 is not None
+    return m2
+
+
+def calc_weekly_min_needed(month_row: sqlite3.Row) -> float:
+    year, month = int(month_row["year"]), int(month_row["month"])
+    override = month_row["sundays_override"]
+    n = int(override) if override else count_sundays_in_month(year, month)
+    if n <= 0:
+        n = 4
+    monthly_min_needed = float(month_row["monthly_min_needed"] or 0.0)
+    return round(monthly_min_needed / n, 2) if monthly_min_needed else 0.0
+
+
+def recalc_services_for_month(month_id: int) -> None:
+    m = get_month_by_id(month_id)
+    weekly_min = calc_weekly_min_needed(m)
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    services = db_fetchall("SELECT * FROM services WHERE month_id=? ORDER BY service_date ASC;", (month_id,))
+    for s in services:
+        cashless = float(s["cashless"] or 0.0)
+        cash = float(s["cash"] or 0.0)
+        total = round(cashless + cash, 2)
+        income_type = str(s["income_type"] or "donation")
+        if income_type == "donation":
+            status = "Собрана" if (weekly_min and total > weekly_min) else "Не собрана"
+            pvs = (total / weekly_min) if weekly_min else 0.0
+            weekly_min_for_row = weekly_min
+        else:
+            status = "Иной доход"
+            pvs = 0.0
+            weekly_min_for_row = 0.0
+        db_exec(
+            """
+            UPDATE services
+            SET total=?, weekly_min_needed=?, mnsps_status=?, pvs_ratio=?, updated_at=?
+            WHERE id=?;
+            """,
+            (total, weekly_min_for_row, status, pvs, now, s["id"]),
+        )
+
+    # Update idx sequentially by date
+    services2 = db_fetchall(
+        "SELECT id FROM services WHERE month_id=? AND income_type='donation' ORDER BY service_date ASC;",
+        (month_id,),
+    )
+    for i, row in enumerate(services2, start=1):
+        db_exec("UPDATE services SET idx=? WHERE id=?;", (i, row["id"]))
+    db_exec(
+        "UPDATE services SET idx=0 WHERE month_id=? AND (income_type!='donation' OR income_type IS NULL);",
+        (month_id,),
+    )
+
+
+def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
+    """
+    Auto expense:
+      category="Десятина"
+      title="10% Объединение"
+      qty=1
+      unit_amount=tithe_amount
+      total=tithe_amount
+      is_system=true
+      date=last day of month
+    """
+    m = get_month_by_id(month_id)
+    year, month = int(m["year"]), int(m["month"])
+    tithe_date = last_day_of_month(year, month)
+    income_sum = float(
+        db_fetchone(
+            """
+            SELECT COALESCE(SUM(total),0) AS s
+            FROM services
+            WHERE month_id=?
+              AND (income_type='donation' OR income_type IS NULL)
+            """,
+            (month_id,),
+        )["s"]
+    )
+    tithe_amount = round(income_sum * 0.10, 2)
+
+    existing = db_fetchone(
+        """
+        SELECT * FROM expenses
+        WHERE month_id=? AND is_system=1 AND title='10% Объединение'
+        LIMIT 1;
+        """,
+        (month_id,),
+    )
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    if existing:
+        before = dict(existing)
+        db_exec(
+            """
+            UPDATE expenses
+            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, updated_at=?
+            WHERE id=?;
+            """,
+            (iso_date(tithe_date), "Десятина", tithe_amount, tithe_amount, now, existing["id"]),
+        )
+        after = dict(db_fetchone("SELECT * FROM expenses WHERE id=?;", (existing["id"],)))
+        log_audit(user_id, "UPSERT_SYSTEM_TITHE", "expense", int(existing["id"]), before, after)
+    else:
+        new_id = db_exec_returning_id(
+            """
+            INSERT INTO expenses (
+                month_id, expense_date, category, title, qty, unit_amount, total, comment,
+                is_system, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 1, ?, ?, NULL, 1, ?, ?);
+            """,
+            (month_id, iso_date(tithe_date), "Десятина", "10% Объединение", tithe_amount, tithe_amount, now, now),
+        )
+        after = dict(db_fetchone("SELECT * FROM expenses WHERE id=?;", (new_id,)))
+        log_audit(user_id, "CREATE_SYSTEM_TITHE", "expense", int(new_id), None, after)
+
+
+def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str, Any]:
+    m = get_month_by_id(month_id)
+    # Services should be recalculated in case weekly_min_needed changed
+    recalc_services_for_month(month_id)
+
+    if ensure_tithe:
+        ensure_tithe_expense(month_id, user_id=None)
+
+    income_sum = float(db_fetchone("SELECT COALESCE(SUM(total),0) AS s FROM services WHERE month_id=?;", (month_id,))["s"])
+    expenses_sum = float(db_fetchone("SELECT COALESCE(SUM(total),0) AS s FROM expenses WHERE month_id=?;", (month_id,))["s"])
+
+    month_balance = round(income_sum - expenses_sum, 2)
+    start_balance = float(m["start_balance"] or 0.0)
+    fact_balance = round(start_balance + income_sum - expenses_sum, 2)
+
+    monthly_min_needed = float(m["monthly_min_needed"] or 0.0)
+    if income_sum > monthly_min_needed:
+        sddr = round(income_sum - monthly_min_needed, 2)
+    else:
+        sddr = 0.0
+
+    monthly_completion = 0.0
+    if monthly_min_needed > 0:
+        monthly_completion = min(income_sum / monthly_min_needed, 1.0)
+
+    # psdpm
+    year, month = int(m["year"]), int(m["month"])
+    prev_y, prev_m = year, month - 1
+    if prev_m == 0:
+        prev_m = 12
+        prev_y -= 1
+    prev = db_fetchone("SELECT id FROM months WHERE year=? AND month=?;", (prev_y, prev_m))
+    psdpm = None
+    if prev:
+        prev_income = float(db_fetchone("SELECT COALESCE(SUM(total),0) AS s FROM services WHERE month_id=?;", (prev["id"],))["s"])
+        if prev_income > 0:
+            psdpm = (income_sum - prev_income) / prev_income
+        else:
+            psdpm = None
+
+    # avg_sunday: avg services.total where total>0
+    row = db_fetchone(
+        """
+        SELECT AVG(total) AS a
+        FROM services
+        WHERE month_id=? AND total>0 AND (income_type='donation' OR income_type IS NULL);
+        """,
+        (month_id,),
+    )
+    avg_sunday = float(row["a"]) if row and row["a"] is not None else 0.0
+
+    # counts / weekly min
+    override = m["sundays_override"]
+    sundays_count = int(override) if override else count_sundays_in_month(year, month)
+    weekly_min = calc_weekly_min_needed(m)
+
+    return {
+        "month": {"id": m["id"], "year": year, "month": month},
+        "monthly_min_needed": round(monthly_min_needed, 2),
+        "sundays_count": sundays_count,
+        "weekly_min_needed": weekly_min,
+
+        "month_income_sum": round(income_sum, 2),
+        "month_expenses_sum": round(expenses_sum, 2),
+
+        "month_balance": month_balance,
+        "start_balance": round(start_balance, 2),
+        "fact_balance": fact_balance,
+
+        "sddr": round(sddr, 2),
+        "monthly_completion": float(monthly_completion),  # 0..1
+
+        "psdpm": psdpm,  # float or None
+        "avg_sunday": round(avg_sunday, 2),
+    }
+
+
+def compute_year_analytics(year: int) -> Dict[str, Any]:
+    months = db_fetchall("SELECT * FROM months WHERE year=? ORDER BY month ASC;", (year,))
+    month_map = {int(m["month"]): m for m in months}
+
+    month_items: List[Dict[str, Any]] = []
+    totals = {
+        "income": 0.0,
+        "expenses": 0.0,
+        "balance": 0.0,
+        "min_needed": 0.0,
+        "months_count": 0,
+    }
+    good_months: List[Dict[str, Any]] = []
+    bad_months: List[Dict[str, Any]] = []
+
+    for m in range(1, 13):
+        row = month_map.get(m)
+        if not row:
+            month_items.append(
+                {
+                    "month": m,
+                    "has_data": False,
+                    "income": 0.0,
+                    "expenses": 0.0,
+                    "balance": 0.0,
+                    "min_needed": 0.0,
+                    "completion": 0.0,
+                }
+            )
+            continue
+
+        summary = compute_month_summary(int(row["id"]), ensure_tithe=True)
+        income = float(summary["month_income_sum"])
+        expenses = float(summary["month_expenses_sum"])
+        balance = float(summary["month_balance"])
+        min_needed = float(summary["monthly_min_needed"])
+        completion = float(summary["monthly_completion"])
+
+        totals["income"] += income
+        totals["expenses"] += expenses
+        totals["balance"] += balance
+        totals["min_needed"] += min_needed
+        totals["months_count"] += 1
+
+        is_good = (min_needed > 0 and income >= min_needed) or (min_needed == 0 and balance >= 0)
+        is_bad = (min_needed > 0 and income < min_needed) or balance < 0
+
+        month_item = {
+            "month": m,
+            "month_id": int(row["id"]),
+            "has_data": True,
+            "income": round(income, 2),
+            "expenses": round(expenses, 2),
+            "balance": round(balance, 2),
+            "min_needed": round(min_needed, 2),
+            "completion": completion,
+        }
+        month_items.append(month_item)
+
+        if is_good:
+            good_months.append(
+                {
+                    "month": m,
+                    "income": round(income, 2),
+                    "balance": round(balance, 2),
+                    "completion": completion,
+                }
+            )
+        elif is_bad:
+            bad_months.append(
+                {
+                    "month": m,
+                    "income": round(income, 2),
+                    "balance": round(balance, 2),
+                    "completion": completion,
+                }
+            )
+
+    totals["income"] = round(totals["income"], 2)
+    totals["expenses"] = round(totals["expenses"], 2)
+    totals["balance"] = round(totals["balance"], 2)
+    totals["min_needed"] = round(totals["min_needed"], 2)
+    totals["completion"] = (
+        round(totals["income"] / totals["min_needed"], 4) if totals["min_needed"] > 0 else 0.0
+    )
+
+    prev_year = year - 1
+    prev_totals = {
+        "income": 0.0,
+        "expenses": 0.0,
+        "balance": 0.0,
+        "min_needed": 0.0,
+        "months_count": 0,
+    }
+    prev_months = db_fetchall("SELECT id FROM months WHERE year=?;", (prev_year,))
+    for row in prev_months:
+        summary = compute_month_summary(int(row["id"]), ensure_tithe=True)
+        prev_totals["income"] += float(summary["month_income_sum"])
+        prev_totals["expenses"] += float(summary["month_expenses_sum"])
+        prev_totals["balance"] += float(summary["month_balance"])
+        prev_totals["min_needed"] += float(summary["monthly_min_needed"])
+        prev_totals["months_count"] += 1
+
+    prev_totals["income"] = round(prev_totals["income"], 2)
+    prev_totals["expenses"] = round(prev_totals["expenses"], 2)
+    prev_totals["balance"] = round(prev_totals["balance"], 2)
+    prev_totals["min_needed"] = round(prev_totals["min_needed"], 2)
+    prev_totals["completion"] = (
+        round(prev_totals["income"] / prev_totals["min_needed"], 4)
+        if prev_totals["min_needed"] > 0
+        else 0.0
+    )
+
+    def ratio(cur: float, prev: float) -> Optional[float]:
+        if prev == 0:
+            return None
+        return (cur - prev) / prev
+
+    yoy = {
+        "income": ratio(totals["income"], prev_totals["income"]),
+        "expenses": ratio(totals["expenses"], prev_totals["expenses"]),
+        "balance": ratio(totals["balance"], prev_totals["balance"]),
+    }
+
+    return {
+        "year": year,
+        "months": month_items,
+        "totals": totals,
+        "prev_year": {"year": prev_year, "totals": prev_totals},
+        "yoy": yoy,
+        "good_months": good_months,
+        "bad_months": bad_months,
+    }
+
+
+# ---------------------------
+# Audit
+# ---------------------------
+
+def log_audit(
+    user_id: Optional[int],
+    action: str,
+    entity_type: str,
+    entity_id: Optional[int],
+    before: Optional[Dict[str, Any]],
+    after: Optional[Dict[str, Any]],
+) -> None:
+    now = iso_now(CFG.tzinfo())
+    db_exec(
+        """
+        INSERT INTO audit_log (user_id, action, entity_type, entity_id, before_json, after_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """,
+        (
+            user_id,
+            action,
+            entity_type,
+            entity_id,
+            json.dumps(before, ensure_ascii=False) if before is not None else None,
+            json.dumps(after, ensure_ascii=False) if after is not None else None,
+            now,
+        ),
+    )
+
+
+# ---------------------------
+# API Auth + roles
+# ---------------------------
+
+class AuthTelegramIn(BaseModel):
+    initData: str = Field(..., description="Telegram WebApp initData string")
+
+
+class AuthOut(BaseModel):
+    token: str
+    user: Dict[str, Any]
+
+
+def get_bearer_token(request: Request) -> str:
+    h = request.headers.get("Authorization", "").strip()
+    if not h.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing Authorization Bearer token")
+    return h.split(" ", 1)[1].strip()
+
+
+def get_current_user(request: Request) -> sqlite3.Row:
+    token = get_bearer_token(request)
+    payload = verify_session_token(token, CFG.SESSION_SECRET)
+    telegram_id = int(payload.get("telegram_id", 0))
+    if not telegram_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    u = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (telegram_id,))
+    if not u or int(u["active"]) != 1:
+        raise HTTPException(status_code=403, detail="User not allowed / inactive")
+    return u
+
+
+def require_role(*allowed_roles: str):
+    def _dep(u: sqlite3.Row = Depends(get_current_user)) -> sqlite3.Row:
+        role = str(u["role"])
+        if role not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient role")
+        return u
+    return _dep
+
+
+# ---------------------------
+# API Models (requests)
+# ---------------------------
+
+class MonthCreateIn(BaseModel):
+    year: int
+    month: int
+    monthly_min_needed: float = 0.0
+    start_balance: Optional[float] = None
+    sundays_override: Optional[int] = Field(None, description="Admin override: 4 or 5 (optional)")
+
+
+class MonthUpdateIn(BaseModel):
+    monthly_min_needed: Optional[float] = None
+    start_balance: Optional[float] = None
+    sundays_override: Optional[int] = None
+
+
+class ServiceIn(BaseModel):
+    service_date: dt.date
+    cashless: float = 0.0
+    cash: float = 0.0
+    income_type: str = "donation"
+
+
+class ExpenseIn(BaseModel):
+    expense_date: dt.date
+    category: str
+    title: str
+    qty: float = 1.0
+    unit_amount: float = 0.0
+    comment: Optional[str] = None
+
+
+class SettingsUpdateIn(BaseModel):
+    report_chat_id: Optional[int] = None
+    sunday_report_time: Optional[str] = None  # "HH:MM"
+    month_report_time: Optional[str] = None   # "HH:MM"
+    timezone: Optional[str] = None
+    ui_theme: Optional[str] = None
+    daily_expenses_enabled: Optional[bool] = None
+
+
+# ---------------------------
+# Telegram Bot (aiogram)
+# ---------------------------
+
+bot: Optional[Bot] = None
+dp: Optional[Dispatcher] = None
+router = Router()
+
+# Pending confirmations (in-memory)
+PENDING: Dict[int, Dict[str, Any]] = {}  # telegram_id -> payload
+
+
+def is_allowed_telegram_user(telegram_id: int) -> bool:
+    allow = refresh_allowlist_if_needed()
+    u = allow.get(int(telegram_id))
+    return bool(u and u.get("active") is True)
+
+
+def get_user_role_from_db(telegram_id: int) -> str:
+    row = db_fetchone("SELECT role, active FROM users WHERE telegram_id=?;", (telegram_id,))
+    if not row or int(row["active"]) != 1:
+        return "none"
+    return str(row["role"])
+
+
+def main_menu_kb(role: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text="Открыть бухгалтерию (WebApp)", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
+        [
+            InlineKeyboardButton(text="Быстрый ввод пожертвования", callback_data="quick:donation"),
+            InlineKeyboardButton(text="Быстрый ввод расхода", callback_data="quick:expense"),
+        ],
+        [InlineKeyboardButton(text="Отчёты", callback_data="menu:reports")],
+    ]
+    if role == "admin":
+        buttons.append([InlineKeyboardButton(text="Настройки", callback_data="menu:settings")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def confirm_kb(kind: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Сохранить", callback_data=f"confirm:save:{kind}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"confirm:cancel:{kind}"),
+            ]
+        ]
+    )
+
+
+def reports_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Отчёт за текущее воскресенье", callback_data="report:sunday")],
+            [InlineKeyboardButton(text="Расходы за текущий месяц", callback_data="report:month_expenses")],
+            [InlineKeyboardButton(text="Итоги месяца", callback_data="report:month_summary")],
+            [InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
+        ]
+    )
+
+    def webapp_url_with_screen(screen: str) -> str:
+        url = CFG.WEBAPP_URL
+        try:
+            parsed = urllib.parse.urlparse(url)
+            query = urllib.parse.parse_qs(parsed.query)
+            query["screen"] = [screen]
+            new_query = urllib.parse.urlencode(query, doseq=True)
+            return urllib.parse.urlunparse(parsed._replace(query=new_query))
+        except Exception:
+            sep = "&" if "?" in url else "?"
+            return f"{url}{sep}screen={screen}"
+
+    def parse_quick_input(text: str) -> Optional[Dict[str, Any]]:
+        """
+        Форматы из ТЗ:
+          "пож 8500 4800"   -> cashless=8500, cash=4800
+          "расход 2500 зал" -> unit_amount=2500, category="зал", title="зал"
+        """
+        t = text.strip()
+        low = t.lower()
+
+    if low.startswith("пож"):
+        parts = t.split()
+        if len(parts) < 2:
+            return None
+        cashless = float(parts[1].replace(",", "."))
+        cash = float(parts[2].replace(",", ".")) if len(parts) >= 3 else 0.0
+        return {"kind": "donation", "cashless": cashless, "cash": cash}
+
+    if low.startswith("расход"):
+        parts = t.split()
+        if len(parts) < 2:
+            return None
+        amount = float(parts[1].replace(",", "."))
+        tail = " ".join(parts[2:]).strip() if len(parts) >= 3 else "Прочее"
+        category = tail if tail else "Прочее"
+        title = tail if tail else "Расход"
+        return {"kind": "expense", "unit_amount": amount, "category": category, "title": title}
+
+    return None
+
+
+def last_sunday(today: dt.date) -> dt.date:
+    # Sunday is weekday=6
+    delta = (today.weekday() - 6) % 7
+    return today - dt.timedelta(days=delta)
+
+
+def format_telegram_exception(exc: Exception) -> str:
+    msg = str(exc)
+    lower = msg.lower()
+    hint = ""
+    if "chat not found" in lower:
+        hint = "Чат не найден. Проверьте chat_id и добавьте бота в чат/канал или нажмите /start."
+    elif "bot was blocked by the user" in lower:
+        hint = "Бот заблокирован пользователем. Нужно разблокировать и снова нажать /start."
+    elif "not enough rights" in lower or "administrator rights" in lower:
+        hint = "У бота нет прав в чате. Проверьте, что бот добавлен и имеет доступ к отправке сообщений."
+    return f"{msg}. {hint}".strip()
+
+
+async def bot_send_safe(chat_id: int, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None) -> None:
+    if not bot:
+        return
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    except Exception as exc:
+        # avoid crashing scheduler/bot
+        print("Failed to send message:", format_telegram_exception(exc))
+
+
+async def bot_send_or_http_error(
+    chat_id: int,
+    text: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+) -> None:
+    if not bot:
+        raise HTTPException(status_code=503, detail="Bot is not initialized")
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    except TelegramForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=format_telegram_exception(exc))
+    except TelegramBadRequest as exc:
+        raise HTTPException(status_code=400, detail=format_telegram_exception(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=format_telegram_exception(exc))
+
+
+async def ensure_report_chat_reachable(chat_id: int) -> None:
+    if not bot:
+        raise HTTPException(status_code=503, detail="Bot is not initialized")
+    try:
+        await bot.get_chat(chat_id)
+    except TelegramForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=format_telegram_exception(exc))
+    except TelegramBadRequest as exc:
+        raise HTTPException(status_code=400, detail=format_telegram_exception(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=format_telegram_exception(exc))
+
+
+async def send_report_to_recipients(
+        text: str,
+        reply_markup: Optional[InlineKeyboardMarkup],
+        recipients: List[int],
+        raise_on_error: bool,
+) -> None:
+    if not recipients:
+        if raise_on_error:
+            raise HTTPException(status_code=400, detail="No report recipients configured")
+        return
+    errors: List[str] = []
+    for chat_id in recipients:
+        safe_markup = reply_markup if is_allowed_telegram_user(chat_id) else None
+        try:
+            if raise_on_error:
+                await bot_send_or_http_error(chat_id, text, safe_markup)
+            else:
+                await bot_send_safe(chat_id, text, safe_markup)
+        except HTTPException as exc:
+            errors.append(f"{chat_id}: {exc.detail}")
+    if errors and raise_on_error:
+        raise HTTPException(status_code=502, detail="; ".join(errors))
+
+
+@router.message(Command("start"))
+async def on_start(m: Message):
+    tid = m.from_user.id if m.from_user else 0
+    if not tid or not is_allowed_telegram_user(tid):
+        await m.answer(
+            "Доступ запрещён. Ваш Telegram ID не в allowlist.\n"
+            f"Ваш Telegram ID: {tid}\n"
+            "Добавьте его в users.json и повторите /start."
+        )
+        return
+    if tid:
+        register_bot_subscriber(tid)
+
+    role = get_user_role_from_db(tid)
+    await m.answer(
+        "Меню бухгалтерии:",
+        reply_markup=main_menu_kb(role),
+    )
+
+
+@router.message(F.text)
+async def on_text(m: Message):
+    if not m.from_user or not m.text:
+        return
+    tid = m.from_user.id
+    if not is_allowed_telegram_user(tid):
+        return
+
+    parsed = parse_quick_input(m.text)
+    if not parsed:
+        return
+
+    tz = CFG.tzinfo()
+    today = dt.datetime.now(tz).date()
+
+    if parsed["kind"] == "donation":
+        s_date = last_sunday(today)
+        PENDING[tid] = {
+            "kind": "donation",
+            "service_date": s_date.isoformat(),
+            "cashless": float(parsed["cashless"]),
+            "cash": float(parsed["cash"]),
+        }
+        await m.answer(
+            f"Проверить пожертвование:\n"
+            f"Дата: {s_date.strftime('%d.%m.%Y')}\n"
+            f"Безнал: {parsed['cashless']:.2f}\n"
+            f"Наличные: {parsed['cash']:.2f}\n"
+            f"Итого: {(parsed['cashless']+parsed['cash']):.2f}",
+            reply_markup=confirm_kb("donation"),
+        )
+        return
+
+    if parsed["kind"] == "expense":
+        e_date = today
+        PENDING[tid] = {
+            "kind": "expense",
+            "expense_date": e_date.isoformat(),
+            "category": parsed["category"],
+            "title": parsed["title"],
+            "qty": 1.0,
+            "unit_amount": float(parsed["unit_amount"]),
+            "comment": None,
+        }
+        await m.answer(
+            f"Проверить расход:\n"
+            f"Дата: {e_date.strftime('%d.%m.%Y')}\n"
+            f"Категория: {parsed['category']}\n"
+            f"Название: {parsed['title']}\n"
+            f"Сумма: {parsed['unit_amount']:.2f}",
+            reply_markup=confirm_kb("expense"),
+        )
+        return
+
+
+@router.callback_query(F.data.startswith("quick:"))
+async def on_quick(cq: CallbackQuery):
+    if not cq.from_user:
+        return
+    tid = cq.from_user.id
+    if not is_allowed_telegram_user(tid):
+        await cq.answer("Нет доступа", show_alert=True)
+        return
+
+    kind = cq.data.split(":", 1)[1]
+    if kind == "donation":
+        await cq.message.answer("Отправьте сообщением: `пож 8500 4800` (безнал нал)", parse_mode="Markdown")
+        await cq.answer()
+        return
+    if kind == "expense":
+        await cq.message.answer("Отправьте сообщением: `расход 2500 зал`", parse_mode="Markdown")
+        await cq.answer()
+        return
+
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("menu:reports"))
+async def on_reports_menu(cq: CallbackQuery):
+    if not cq.from_user:
+        return
+    tid = cq.from_user.id
+    if not is_allowed_telegram_user(tid):
+        await cq.answer("Нет доступа", show_alert=True)
+        return
+        await cq.message.answer("Отчёты:", reply_markup=reports_kb())
+        await cq.answer()
+
+    @router.callback_query(F.data.startswith("menu:settings"))
+    async def on_settings_menu(cq: CallbackQuery):
+        if not cq.from_user:
+            return
+        tid = cq.from_user.id
+        if not is_allowed_telegram_user(tid):
+            await cq.answer("Нет доступа", show_alert=True)
+            return
+
+        role = get_user_role_from_db(tid)
+        if role != "admin":
+            await cq.answer("Нет доступа", show_alert=True)
+            return
+
+        await cq.message.answer(
+            "Настройки:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Открыть настройки (WebApp)",
+                                          web_app=WebAppInfo(url=webapp_url_with_screen("settings")))]
+                ]
+            ),
+        )
+        await cq.answer()
+
+    @router.callback_query(F.data.startswith("report:"))
+    async def on_report_actions(cq: CallbackQuery):
+        if not cq.from_user:
+            return
+        tid = cq.from_user.id
+        if not is_allowed_telegram_user(tid):
+            await cq.answer("Нет доступа", show_alert=True)
+            return
+
+
+    role = get_user_role_from_db(tid)
+    if role not in ("admin", "accountant", "viewer"):
+        await cq.answer("Нет роли", show_alert=True)
+        return
+
+    tz = CFG.tzinfo()
+    today = dt.datetime.now(tz).date()
+    action = cq.data.split(":", 1)[1]
+
+    if action == "sunday":
+        text, kb = build_sunday_report_text(today)
+        await cq.message.answer(text, reply_markup=kb)
+        await cq.answer()
+        return
+
+    if action == "month_expenses":
+        text, kb = build_month_expenses_report_text(today)
+        await cq.message.answer(text, reply_markup=kb)
+        await cq.answer()
+        return
+
+    if action == "month_summary":
+        m = get_or_create_month(today.year, today.month)
+        summary = compute_month_summary(int(m["id"]), ensure_tithe=True)
+        text = format_month_summary_text(summary)
+        await cq.message.answer(text, reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=CFG.WEBAPP_URL))]]
+        ))
+        await cq.answer()
+        return
+
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("confirm:"))
+async def on_confirm(cq: CallbackQuery):
+    if not cq.from_user:
+        return
+    tid = cq.from_user.id
+    if not is_allowed_telegram_user(tid):
+        await cq.answer("Нет доступа", show_alert=True)
+        return
+
+    parts = cq.data.split(":")
+    if len(parts) < 3:
+        await cq.answer()
+        return
+    action = parts[1]  # save / cancel
+    kind = parts[2]
+
+    pending = PENDING.get(tid)
+    if not pending or pending.get("kind") != kind:
+        await cq.answer("Нет данных для сохранения", show_alert=True)
+        return
+
+    if action == "cancel":
+        PENDING.pop(tid, None)
+        await cq.message.answer("Отменено.")
+        await cq.answer()
+        return
+
+    # save
+    user_row = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (tid,))
+    if not user_row or int(user_row["active"]) != 1:
+        await cq.answer("Пользователь не активен", show_alert=True)
+        return
+    user_id = int(user_row["id"])
+    role = str(user_row["role"])
+    if role not in ("admin", "accountant"):
+        await cq.answer("Недостаточно прав для сохранения", show_alert=True)
+        return
+
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    if kind == "donation":
+        s_date = parse_iso_date(pending["service_date"])
+        m = get_or_create_month(s_date.year, s_date.month)
+        month_id = int(m["id"])
+
+        before = db_fetchone("SELECT * FROM services WHERE month_id=? AND service_date=?;", (month_id, pending["service_date"]))
+        cashless = float(pending["cashless"])
+        cash = float(pending["cash"])
+        total = round(cashless + cash, 2)
+
+        # upsert service
+        if before:
+            db_exec(
+                """
+                UPDATE services
+                SET cashless=?, cash=?, total=?, updated_at=?
+                WHERE id=?;
+                """,
+                (cashless, cash, total, now, before["id"]),
+            )
+            after = db_fetchone("SELECT * FROM services WHERE id=?;", (before["id"],))
+            log_audit(user_id, "UPDATE", "service", int(before["id"]), dict(before), dict(after) if after else None)
+        else:
+            new_id = db_exec_returning_id(
+                """
+                INSERT INTO services (
+                    month_id, service_date, idx, cashless, cash, total,
+                    weekly_min_needed, mnsps_status, pvs_ratio,
+                    created_at, updated_at
+                ) VALUES (?, ?, 1, ?, ?, ?, 0, 'Не собрана', 0, ?, ?);
+                """,
+                (month_id, pending["service_date"], cashless, cash, total, now, now),
+            )
+            after = db_fetchone("SELECT * FROM services WHERE id=?;", (new_id,))
+            log_audit(user_id, "CREATE", "service", int(new_id), None, dict(after) if after else None)
+
+        # Recalc + tithe
+        recalc_services_for_month(month_id)
+        ensure_tithe_expense(month_id, user_id=user_id)
+
+        PENDING.pop(tid, None)
+        await cq.message.answer("✅ Пожертвование сохранено.")
+        await cq.answer()
+        return
+
+    if kind == "expense":
+        e_date = parse_iso_date(pending["expense_date"])
+        m = get_or_create_month(e_date.year, e_date.month)
+        month_id = int(m["id"])
+
+        new_id = db_exec_returning_id(
+            """
+            INSERT INTO expenses (
+                month_id, expense_date, category, title, qty, unit_amount, total, comment,
+                is_system, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?);
+            """,
+            (
+                month_id,
+                pending["expense_date"],
+                pending["category"],
+                pending["title"],
+                float(pending.get("qty", 1.0)),
+                float(pending["unit_amount"]),
+                round(float(pending.get("qty", 1.0)) * float(pending["unit_amount"]), 2),
+                pending.get("comment"),
+                now,
+                now,
+            ),
+        )
+        after = db_fetchone("SELECT * FROM expenses WHERE id=?;", (new_id,))
+        log_audit(user_id, "CREATE", "expense", int(new_id), None, dict(after) if after else None)
+
+        # expenses changed -> recompute summary (tithe depends on income, но пусть живёт; ensure anyway)
+        ensure_tithe_expense(month_id, user_id=user_id)
+
+        PENDING.pop(tid, None)
+        await cq.message.answer("✅ Расход сохранён.")
+        await cq.answer()
+        return
+
+    await cq.answer()
+
+
+# ---------------------------
+# Report builders (Telegram text)
+# ---------------------------
+
+def fmt_money(x: float) -> str:
+    # 41 502.16 style
+    s = f"{x:,.2f}"
+    s = s.replace(",", " ").replace(".00", ".00")
+    return s
+
+
+def fmt_percent_1(x: float) -> str:
+    return f"{x * 100:.1f}%"
+
+
+def build_sunday_report_text(today: dt.date) -> Tuple[str, InlineKeyboardMarkup]:
+    tz = CFG.tzinfo()
+    s_date = last_sunday(today)
+    m = get_or_create_month(s_date.year, s_date.month)
+    month_id = int(m["id"])
+
+    recalc_services_for_month(month_id)
+    ensure_tithe_expense(month_id, user_id=None)
+
+    service = db_fetchone(
+        """
+        SELECT * FROM services
+        WHERE month_id=? AND service_date=? AND (income_type='donation' OR income_type IS NULL);
+        """,
+        (month_id, s_date.isoformat()),
+    )
+    cashless = float(service["cashless"]) if service else 0.0
+    cash = float(service["cash"]) if service else 0.0
+    total = float(service["total"]) if service else 0.0
+    weekly_min = float(service["weekly_min_needed"]) if service else calc_weekly_min_needed(m)
+    status = str(service["mnsps_status"]) if service else ("Собрана" if (weekly_min and total > weekly_min) else "Не собрана")
+    pvs = float(service["pvs_ratio"]) if service else ((total / weekly_min) if weekly_min else 0.0)
+
+    summary = compute_month_summary(month_id, ensure_tithe=True)
+
+    title = f"<b>Отчёт по пожертвованиям — {s_date.strftime('%d.%m.%Y')}</b>"
+    block1 = (
+        f"\n\n<b>Пожертвования</b>\n"
+        f"• Безнал: <b>{fmt_money(cashless)}</b>\n"
+        f"• Наличные: <b>{fmt_money(cash)}</b>\n"
+        f"• Итого: <b>{fmt_money(total)}</b>"
+    )
+    block2 = (
+        f"\n\n<b>МНСП на воскресенье</b>\n"
+        f"• Минимум: <b>{fmt_money(weekly_min)}</b>\n"
+        f"• Статус: <b>{status}</b>\n"
+        f"• ПВС: <b>{fmt_percent_1(pvs)}</b>"
+    )
+    sddr = float(summary["sddr"])
+    sddr_text = fmt_money(sddr) if sddr > 0 else "Нет суммы"
+
+    block3 = (
+        f"\n\n<b>Месяц на текущую дату</b>\n"
+        f"• Итого доход: <b>{fmt_money(float(summary['month_income_sum']))}</b>\n"
+        f"• Выполнение МНСП: <b>{fmt_percent_1(float(summary['monthly_completion']))}</b>\n"
+        f"• СДДР: <b>{sddr_text}</b>"
+    )
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
+            [InlineKeyboardButton(text="Добавить расход", callback_data="quick:expense")],
+            [InlineKeyboardButton(text="История месяца", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
+        ]
+    )
+    return title + block1 + block2 + block3, kb
+
+
+def build_month_expenses_report_text(today: dt.date) -> Tuple[str, InlineKeyboardMarkup]:
+    m = get_or_create_month(today.year, today.month)
+    month_id = int(m["id"])
+
+    ensure_tithe_expense(month_id, user_id=None)
+    summary = compute_month_summary(month_id, ensure_tithe=True)
+
+    rows = db_fetchall(
+        """
+        SELECT category, SUM(total) AS s
+        FROM expenses
+        WHERE month_id=?
+        GROUP BY category
+        ORDER BY s DESC
+        LIMIT 3;
+        """,
+        (month_id,),
+    )
+    top = "\n".join([f"• {r['category']}: <b>{fmt_money(float(r['s']))}</b>" for r in rows]) or "—"
+
+    last5 = db_fetchall(
+        """
+        SELECT expense_date, title, category, total
+        FROM expenses
+        WHERE month_id=?
+        ORDER BY expense_date DESC, id DESC
+        LIMIT 5;
+        """,
+        (month_id,),
+    )
+    last_lines = []
+    for r in last5:
+        d = parse_iso_date(str(r["expense_date"]))
+        last_lines.append(f"• {d.strftime('%d.%m')}: {r['title']} — <b>{fmt_money(float(r['total']))}</b> ({r['category']})")
+    last_block = "\n".join(last_lines) or "—"
+
+    month_name = calendar.month_name[int(m["month"])]
+    title = f"<b>Расходы — {month_name} {int(m['year'])}</b>"
+
+    body = (
+        f"\n\n<b>Сумма расходов</b>\n"
+        f"• Итого: <b>{fmt_money(float(summary['month_expenses_sum']))}</b>\n\n"
+        f"<b>Топ-категории</b>\n{top}\n\n"
+        f"<b>Последние 5 расходов</b>\n{last_block}\n\n"
+        f"<b>Балансы</b>\n"
+        f"• Баланс месяца: <b>{fmt_money(float(summary['month_balance']))}</b>\n"
+        f"• Факт. баланс: <b>{fmt_money(float(summary['fact_balance']))}</b>"
+    )
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
+            [InlineKeyboardButton(text="Добавить расход", callback_data="quick:expense")],
+        ]
+    )
+    return title + body, kb
+
+
+def format_month_summary_text(summary: Dict[str, Any]) -> str:
+    y = summary["month"]["year"]
+    m = summary["month"]["month"]
+    month_name = calendar.month_name[int(m)]
+
+    psdpm = summary["psdpm"]
+    psdpm_text = f"{psdpm*100:.1f}%" if isinstance(psdpm, (int, float)) else "—"
+    sddr = float(summary["sddr"])
+    sddr_text = fmt_money(sddr) if sddr > 0 else "Нет суммы"
+
+    return (
+        f"<b>Итоги месяца — {month_name} {y}</b>\n\n"
+        f"<b>Ключевые показатели</b>\n"
+        f"• Доход: <b>{fmt_money(float(summary['month_income_sum']))}</b>\n"
+        f"• Расход: <b>{fmt_money(float(summary['month_expenses_sum']))}</b>\n"
+        f"• Баланс: <b>{fmt_money(float(summary['month_balance']))}</b>\n"
+        f"• Факт. баланс: <b>{fmt_money(float(summary['fact_balance']))}</b>\n\n"
+        f"<b>МНСП</b>\n"
+        f"• МНСП месяц: <b>{fmt_money(float(summary['monthly_min_needed']))}</b>\n"
+        f"• Выполнение: <b>{fmt_percent_1(float(summary['monthly_completion']))}</b>\n"
+        f"• СДДР: <b>{sddr_text}</b>\n\n"
+        f"<b>Сравнение</b>\n"
+        f"• ПСДПМ: <b>{psdpm_text}</b>\n"
+        f"• Среднее воскресенье: <b>{fmt_money(float(summary['avg_sunday']))}</b>"
+    )
+
+
+# ---------------------------
+# Scheduler jobs
+# ---------------------------
+
+scheduler = AsyncIOScheduler()
+
+
+def parse_hhmm(s: str, default_h: int, default_m: int) -> Tuple[int, int]:
+    try:
+        hh, mm = s.strip().split(":")
+        h = int(hh)
+        m = int(mm)
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return h, m
+    except Exception:
+        pass
+    return default_h, default_m
+
+
+def reschedule_jobs() -> None:
+    # remove previous jobs
+    for job_id in ("job_sunday_report", "job_daily_expenses"):
+        try:
+            scheduler.remove_job(job_id)
+        except Exception:
+            pass
+
+    s = get_settings()
+    tz_name = str(s["timezone"] or CFG.TZ)
+    tzinfo = ZoneInfo(tz_name)
+
+    sunday_time = str(s["sunday_report_time"] or "18:00")
+    h, m = parse_hhmm(sunday_time, 18, 0)
+
+    # Every Sunday
+    scheduler.add_job(
+        func=lambda: asyncio.create_task(run_sunday_report_job()),
+        trigger=CronTrigger(day_of_week="sun", hour=h, minute=m, timezone=tzinfo),
+        id="job_sunday_report",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+    daily_enabled = int(s["daily_expenses_enabled"] or 0) == 1
+    if daily_enabled:
+        daily_time = str(s["month_report_time"] or "21:00")
+        dh, dm = parse_hhmm(daily_time, 21, 0)
+        scheduler.add_job(
+            func=lambda: asyncio.create_task(run_daily_expenses_job()),
+            trigger=CronTrigger(hour=dh, minute=dm, timezone=tzinfo),
+            id="job_daily_expenses",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+
+
+async def run_sunday_report_job() -> None:
+    s = get_settings()
+    recipients = list_report_recipients(s)
+    if not recipients:
+        return
+    tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
+    today = dt.datetime.now(tzinfo).date()
+    text, kb = build_sunday_report_text(today)
+    await send_report_to_recipients(text, kb, recipients, raise_on_error=False)
+
+
+async def run_daily_expenses_job() -> None:
+    s = get_settings()
+    recipients = list_report_recipients(s)
+    if not recipients:
+        return
+    tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
+    today = dt.datetime.now(tzinfo).date()
+    text, kb = build_month_expenses_report_text(today)
+    await send_report_to_recipients(text, kb, recipients, raise_on_error=False)
+
+# ---------------------------
+# FastAPI app
+# ---------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # init DB
+    init_db()
+
+    # load allowlist and sync to db
+    allow = load_allowlist()
+    sync_allowlist_to_db(allow)
+    app.state.allowlist = allow
+    global ALLOWLIST_CACHE, ALLOWLIST_MTIME
+    ALLOWLIST_CACHE = allow
+    try:
+        ALLOWLIST_MTIME = os.path.getmtime(CFG.USERS_JSON_PATH)
+    except FileNotFoundError:
+        ALLOWLIST_MTIME = None
+
+    # init bot + dp
+    global bot, dp
+    from aiogram.client.default import DefaultBotProperties
+
+    bot = Bot(
+        token=CFG.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML")
+    )
+
+
+    dp = Dispatcher()
+    dp.include_router(router)
+
+    # scheduler
+    if not scheduler.running:
+        scheduler.start()
+    reschedule_jobs()
+
+    # start polling as background task
+    polling_task = asyncio.create_task(dp.start_polling(bot))  # type: ignore[arg-type]
+
+    try:
+        yield
+    finally:
+        try:
+            polling_task.cancel()
+        except Exception:
+            pass
+        try:
+            await bot.session.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass
+
+
+APP = FastAPI(title="Church Accounting Bot", version="1.0.0", lifespan=lifespan)
+
+APP.add_middleware(
+    CORSMiddleware,
+    allow_origins=[CFG.APP_URL, CFG.WEBAPP_URL, "http://localhost", "http://localhost:8000", "*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@APP.get("/health")
+def health():
+    return {"ok": True}
+
+
+# (опционально) отдача webapp.html
+@APP.get("/webapp")
+def webapp():
+    path = os.path.join(os.path.dirname(__file__), "webapp.html")
+    if not os.path.exists(path):
+        return JSONResponse({"detail": "webapp.html not found"}, status_code=404)
+    return FileResponse(path, media_type="text/html")
+
+
+# ---------------------------
+# Auth
+# ---------------------------
+
+@APP.post("/api/auth/telegram", response_model=AuthOut)
+def auth_telegram(body: AuthTelegramIn, request: Request):
+    user_obj = validate_telegram_init_data(body.initData, CFG.BOT_TOKEN)
+    telegram_id = int(user_obj.get("id", 0))
+    if not telegram_id:
+        raise HTTPException(status_code=401, detail="Invalid Telegram user id")
+
+    allow = refresh_allowlist_if_needed()
+    allow_user = allow.get(telegram_id)
+    if not allow_user or not allow_user.get("active"):
+        raise HTTPException(status_code=403, detail="User not in allowlist or inactive")
+
+    # sync single user from allowlist (in case file changed)
+    sync_allowlist_to_db({telegram_id: allow_user})
+
+    u = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (telegram_id,))
+    if not u or int(u["active"]) != 1:
+        raise HTTPException(status_code=403, detail="User inactive")
+
+    # session token
+    exp = int(time.time()) + 7 * 24 * 3600
+    token = make_session_token(
+        {
+            "telegram_id": telegram_id,
+            "role": str(u["role"]),
+            "exp": exp,
+        },
+        CFG.SESSION_SECRET,
+    )
+    return {"token": token, "user": {"telegram_id": telegram_id, "name": u["name"], "role": u["role"]}}
+
+
+@APP.get("/api/me")
+def me(u: sqlite3.Row = Depends(get_current_user)):
+    return {"id": u["id"], "telegram_id": u["telegram_id"], "name": u["name"], "role": u["role"]}
+
+
+# ---------------------------
+# Months
+# ---------------------------
+
+@APP.get("/api/months")
+def list_months(
+    year: int = Query(...),
+    u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    rows = db_fetchall("SELECT * FROM months WHERE year=? ORDER BY month ASC;", (year,))
+    return {"items": [dict(r) for r in rows]}
+
+
+@APP.post("/api/months")
+def create_month(
+    body: MonthCreateIn,
+    u: sqlite3.Row = Depends(require_role("admin")),
+):
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    # start_balance default: previous month fact_balance
+    start_balance = body.start_balance
+    if start_balance is None:
+        prev_y, prev_m = body.year, body.month - 1
+        if prev_m == 0:
+            prev_m = 12
+            prev_y -= 1
+        prev = db_fetchone("SELECT id FROM months WHERE year=? AND month=?;", (prev_y, prev_m))
+        if prev:
+            prev_summary = compute_month_summary(int(prev["id"]), ensure_tithe=True)
+            start_balance = float(prev_summary["fact_balance"])
+        else:
+            start_balance = 0.0
+
+    try:
+        new_id = db_exec_returning_id(
+            """
+            INSERT INTO months (year, month, monthly_min_needed, start_balance, sundays_override, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (body.year, body.month, float(body.monthly_min_needed), float(start_balance), body.sundays_override, now, now),
+        )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Month already exists")
+
+    after = db_fetchone("SELECT * FROM months WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "month", int(new_id), None, dict(after) if after else None)
+
+    recalc_services_for_month(new_id)
+    ensure_tithe_expense(new_id, user_id=int(u["id"]))
+    return {"id": new_id}
+
+
+@APP.get("/api/months/{month_id}/summary")
+def month_summary(
+    month_id: int,
+    u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    return compute_month_summary(month_id, ensure_tithe=True)
+
+
+@APP.get("/api/analytics/year")
+def year_analytics(
+    year: int = Query(...),
+    u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    return compute_year_analytics(int(year))
+
+
+@APP.put("/api/months/{month_id}")
+def update_month(
+    month_id: int,
+    body: MonthUpdateIn,
+    u: sqlite3.Row = Depends(require_role("admin")),
+):
+    before = db_fetchone("SELECT * FROM months WHERE id=?;", (month_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Month not found")
+
+    fields = []
+    params: List[Any] = []
+    if body.monthly_min_needed is not None:
+        fields.append("monthly_min_needed=?")
+        params.append(float(body.monthly_min_needed))
+    if body.start_balance is not None:
+        fields.append("start_balance=?")
+        params.append(float(body.start_balance))
+    if body.sundays_override is not None:
+        fields.append("sundays_override=?")
+        params.append(int(body.sundays_override))
+
+    if not fields:
+        return {"ok": True}
+
+    params.append(iso_now(CFG.tzinfo()))
+    params.append(month_id)
+
+    db_exec(f"UPDATE months SET {', '.join(fields)}, updated_at=? WHERE id=?;", tuple(params))
+    after = db_fetchone("SELECT * FROM months WHERE id=?;", (month_id,))
+    log_audit(int(u["id"]), "UPDATE", "month", month_id, dict(before), dict(after) if after else None)
+
+    recalc_services_for_month(month_id)
+    ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    return {"ok": True}
+
+
+# ---------------------------
+# Services (donations)
+# ---------------------------
+
+@APP.get("/api/months/{month_id}/services")
+def list_services(
+    month_id: int,
+    u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    recalc_services_for_month(month_id)
+    rows = db_fetchall("SELECT * FROM services WHERE month_id=? ORDER BY service_date ASC;", (month_id,))
+    return {"items": [dict(r) for r in rows]}
+
+
+@APP.post("/api/months/{month_id}/services")
+def create_service(
+    month_id: int,
+    body: ServiceIn,
+    u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    m = get_month_by_id(month_id)
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    service_date = body.service_date.isoformat()
+    before = db_fetchone("SELECT * FROM services WHERE month_id=? AND service_date=?;", (month_id, service_date))
+
+    cashless = float(body.cashless)
+    cash = float(body.cash)
+    total = round(cashless + cash, 2)
+    income_type = (body.income_type or "donation").strip().lower()
+    if income_type not in ("donation", "other"):
+        raise HTTPException(status_code=400, detail="Invalid income_type")
+
+    if before and str(before["income_type"] or "donation") != income_type:
+        raise HTTPException(
+            status_code=409,
+            detail="Service already exists for this date with another income type",
+        )
+
+    if before:
+        db_exec(
+            """
+            UPDATE services
+            SET cashless=?, cash=?, total=?, income_type=?, updated_at=?
+            WHERE id=?;
+            """,
+            (cashless, cash, total, income_type, now, before["id"]),
+        )
+        after = db_fetchone("SELECT * FROM services WHERE id=?;", (before["id"],))
+        log_audit(int(u["id"]), "UPDATE", "service", int(before["id"]), dict(before), dict(after) if after else None)
+        recalc_services_for_month(month_id)
+        ensure_tithe_expense(month_id, user_id=int(u["id"]))
+        return {"id": int(before["id"]), "updated": True}
+
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO services (
+            month_id, service_date, idx, cashless, cash, total,
+            weekly_min_needed, mnsps_status, pvs_ratio, income_type,
+            created_at, updated_at
+        ) VALUES (?, ?, 0, ?, ?, ?, 0, 'Не собрана', 0, ?, ?, ?);
+        """,
+        (month_id, service_date, cashless, cash, total, income_type, now, now),
+    )
+    after = db_fetchone("SELECT * FROM services WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "service", int(new_id), None, dict(after) if after else None)
+
+    recalc_services_for_month(month_id)
+    ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    return {"id": new_id, "updated": False}
+
+
+@APP.put("/api/services/{service_id}")
+def update_service(
+    service_id: int,
+    body: ServiceIn,
+    u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM services WHERE id=?;", (service_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    cashless = float(body.cashless)
+    cash = float(body.cash)
+    total = round(cashless + cash, 2)
+    income_type = (body.income_type or "donation").strip().lower()
+    if income_type not in ("donation", "other"):
+        raise HTTPException(status_code=400, detail="Invalid income_type")
+    new_date = body.service_date.isoformat()
+    existing = db_fetchone(
+        "SELECT id FROM services WHERE month_id=? AND service_date=?;",
+        (int(before["month_id"]), new_date),
+    )
+    if existing and int(existing["id"]) != int(service_id):
+        raise HTTPException(status_code=409, detail="Service date already exists")
+
+    db_exec(
+        """
+        UPDATE services
+        SET service_date=?, cashless=?, cash=?, total=?, income_type=?, updated_at=?
+        WHERE id=?;
+        """,
+        (new_date, cashless, cash, total, income_type, now, service_id),
+    )
+    after = db_fetchone("SELECT * FROM services WHERE id=?;", (service_id,))
+    log_audit(int(u["id"]), "UPDATE", "service", service_id, dict(before), dict(after) if after else None)
+
+    month_id = int(before["month_id"])
+    recalc_services_for_month(month_id)
+    ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    return {"ok": True}
+
+
+@APP.delete("/api/services/{service_id}")
+def delete_service(
+    service_id: int,
+    u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM services WHERE id=?;", (service_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    month_id = int(before["month_id"])
+    db_exec("DELETE FROM services WHERE id=?;", (service_id,))
+    log_audit(int(u["id"]), "DELETE", "service", service_id, dict(before), None)
+
+    recalc_services_for_month(month_id)
+    ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    return {"ok": True}
+
+
+# ---------------------------
+# Expenses
+# ---------------------------
+
+@APP.get("/api/months/{month_id}/expenses")
+def list_expenses(
+        month_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    ensure_tithe_expense(month_id, user_id=None)
+    rows = db_fetchall(
+        """
+        SELECT
+            e.*,
+            (
+                SELECT COUNT(*)
+                FROM attachments a
+                WHERE a.entity_type='expense' AND a.entity_id=e.id
+            ) AS attachments_count
+        FROM expenses e
+        WHERE e.month_id=?
+        ORDER BY e.expense_date DESC, e.id DESC;
+        """,
+        (month_id,),
+    )
+    return {"items": [dict(r) for r in rows]}
+
+
+@APP.post("/api/months/{month_id}/expenses")
+def delete_expense(
+    expense_id: int,
+    u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    total = round(float(body.qty) * float(body.unit_amount), 2)
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO expenses (
+            month_id, expense_date, category, title, qty, unit_amount, total, comment,
+            is_system, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?);
+        """,
+        (
+            month_id,
+            body.expense_date.isoformat(),
+            body.category,
+            body.title,
+            float(body.qty),
+            float(body.unit_amount),
+            total,
+            body.comment,
+            now,
+            now,
+        ),
+    )
+    after = db_fetchone("SELECT * FROM expenses WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "expense", int(new_id), None, dict(after) if after else None)
+
+    # ensure tithe exists (depends on income; no harm to upsert)
+    ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    return {"id": new_id}
+
+
+@APP.put("/api/expenses/{expense_id}")
+def update_expense(
+    expense_id: int,
+    body: ExpenseIn,
+    u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM expenses WHERE id=?;", (expense_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    if int(before["is_system"]) == 1:
+        # system row edit blocked by default
+        raise HTTPException(status_code=403, detail="System expense cannot be edited directly")
+
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+
+    total = round(float(body.qty) * float(body.unit_amount), 2)
+    db_exec(
+        """
+        UPDATE expenses
+        SET expense_date=?, category=?, title=?, qty=?, unit_amount=?, total=?, comment=?, updated_at=?
+        WHERE id=?;
+        """,
+        (
+            body.expense_date.isoformat(),
+            body.category,
+            body.title,
+            float(body.qty),
+            float(body.unit_amount),
+            total,
+            body.comment,
+            now,
+            expense_id,
+        ),
+    )
+    after = db_fetchone("SELECT * FROM expenses WHERE id=?;", (expense_id,))
+    log_audit(int(u["id"]), "UPDATE", "expense", expense_id, dict(before), dict(after) if after else None)
+
+    ensure_tithe_expense(int(before["month_id"]), user_id=int(u["id"]))
+    return {"ok": True}
+
+
+@APP.delete("/api/expenses/{expense_id}")
+def delete_expense(
+    expense_id: int,
+    u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    before = db_fetchone("SELECT * FROM expenses WHERE id=?;", (expense_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    if int(before["is_system"]) == 1:
+        raise HTTPException(status_code=403, detail="System expense cannot be deleted")
+
+    month_id = int(before["month_id"])
+    db_exec("DELETE FROM expenses WHERE id=?;", (expense_id,))
+    log_audit(int(u["id"]), "DELETE", "expense", expense_id, dict(before), None)
+
+    ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    return {"ok": True}
+
+
+# ---------------------------
+# Attachments
+# ---------------------------
+
+@APP.post("/api/expenses/{expense_id}/attachments")
+def upload_expense_attachment(
+        expense_id: int,
+        file: UploadFile = File(...),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    expense = get_expense_or_404(expense_id)
+    ensure_month_open(int(expense["month_id"]))
+
+    content_type = (file.content_type or "").lower()
+    if content_type not in ALLOWED_ATTACHMENT_MIME_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported file type")
+
+    existing = db_fetchone(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM attachments
+        WHERE entity_type='expense' AND entity_id=?;
+        """,
+        (expense_id,),
+    )
+    if existing and int(existing["cnt"]) >= MAX_ATTACHMENTS_PER_EXPENSE:
+        raise HTTPException(status_code=409, detail="Attachments limit reached")
+
+    now = iso_now(CFG.tzinfo())
+    orig_filename = (file.filename or "attachment").strip()
+
+    placeholder_id = db_exec_returning_id(
+        """
+        INSERT INTO attachments (
+            entity_type, entity_id, orig_filename, stored_filename,
+            mime, size_bytes, sha256, created_by_user_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """,
+        (
+            "expense",
+            expense_id,
+            orig_filename,
+            "pending",
+            content_type,
+            0,
+            "pending",
+            int(u["id"]),
+            now,
+        ),
+    )
+
+    ext = attachment_extension(orig_filename, content_type)
+    stored_filename = f"{placeholder_id}_{int(time.time())}_{secrets.token_hex(4)}{ext}"
+    target_dir = attachment_storage_dir(expense_id, now)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / stored_filename
+
+    size_bytes = 0
+    hasher = hashlib.sha256()
+    try:
+        with target_path.open("wb") as out:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                if size_bytes > MAX_ATTACHMENT_BYTES:
+                    raise HTTPException(status_code=413, detail="File too large")
+                hasher.update(chunk)
+                out.write(chunk)
+    except HTTPException:
+        if target_path.exists():
+            target_path.unlink()
+        db_exec("DELETE FROM attachments WHERE id=?;", (placeholder_id,))
+        raise
+    except Exception:
+        if target_path.exists():
+            target_path.unlink()
+        db_exec("DELETE FROM attachments WHERE id=?;", (placeholder_id,))
+        raise HTTPException(status_code=500, detail="Failed to store attachment")
+
+    db_exec(
+        """
+        UPDATE attachments
+        SET stored_filename=?, size_bytes=?, sha256=?
+        WHERE id=?;
+        """,
+        (stored_filename, size_bytes, hasher.hexdigest(), placeholder_id),
+    )
+
+    after = db_fetchone("SELECT * FROM attachments WHERE id=?;", (placeholder_id,))
+    log_audit(int(u["id"]), "CREATE_ATTACHMENT", "attachment", placeholder_id, None, dict(after) if after else None)
+
+    return {
+        "attachment": {
+            "id": placeholder_id,
+            "entity_type": "expense",
+            "entity_id": expense_id,
+            "orig_filename": orig_filename,
+            "mime": content_type,
+            "size_bytes": size_bytes,
+            "created_at": now,
+        }
+    }
+
+
+@APP.get("/api/expenses/{expense_id}/attachments")
+def list_expense_attachments(
+        expense_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    get_expense_or_404(expense_id)
+    rows = db_fetchall(
+        """
+        SELECT id, entity_type, entity_id, orig_filename, mime, size_bytes, created_at
+        FROM attachments
+        WHERE entity_type='expense' AND entity_id=?
+        ORDER BY id DESC;
+        """,
+        (expense_id,),
+    )
+    return {"items": [dict(r) for r in rows]}
+
+
+@APP.get("/api/attachments/{attachment_id}")
+def get_attachment(
+        attachment_id: int,
+        inline: int = Query(1),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    row = get_attachment_or_404(attachment_id)
+    if row["entity_type"] != "expense":
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    expense = db_fetchone("SELECT id FROM expenses WHERE id=?;", (int(row["entity_id"]),))
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    target_path = attachment_storage_dir(int(row["entity_id"]), row["created_at"]) / row["stored_filename"]
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    disposition = "inline" if int(inline or 1) == 1 else "attachment"
+    headers = {"Content-Disposition": f'{disposition}; filename="{row["orig_filename"]}"'}
+    return FileResponse(target_path, media_type=row["mime"], filename=row["orig_filename"], headers=headers)
+
+
+@APP.delete("/api/attachments/{attachment_id}")
+def delete_attachment(
+        attachment_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    row = get_attachment_or_404(attachment_id)
+    if row["entity_type"] != "expense":
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    expense = db_fetchone("SELECT id, month_id FROM expenses WHERE id=?;", (int(row["entity_id"]),))
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    ensure_month_open(int(expense["month_id"]))
+
+    target_path = attachment_storage_dir(int(row["entity_id"]), row["created_at"]) / row["stored_filename"]
+    if target_path.exists():
+        target_path.unlink()
+
+    db_exec("DELETE FROM attachments WHERE id=?;", (attachment_id,))
+    log_audit(int(u["id"]), "DELETE_ATTACHMENT", "attachment", attachment_id, dict(row), None)
+    return {"ok": True}
+
+
+# ---------------------------
+# Settings
+# ---------------------------
+
+@APP.get("/api/settings")
+def api_get_settings(u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer"))):
+    s = get_settings()
+    out = dict(s)
+    out["daily_expenses_enabled"] = bool(int(out.get("daily_expenses_enabled") or 0))
+    return out
+
+
+@APP.put("/api/settings")
+async def api_update_settings(
+    body: SettingsUpdateIn,
+    u: sqlite3.Row = Depends(require_role("admin", "viewer")),
+):
+    role = str(u["role"])
+    if role != "admin":
+        non_theme_fields = [
+            body.report_chat_id,
+            body.sunday_report_time,
+            body.month_report_time,
+            body.timezone,
+            body.daily_expenses_enabled,
+        ]
+        if body.ui_theme is None or any(field is not None for field in non_theme_fields):
+            raise HTTPException(status_code=403, detail="Only theme updates allowed")
+
+    before = get_settings()
+    fields = []
+    params: List[Any] = []
+
+    if body.report_chat_id is not None:
+        report_chat_id = int(body.report_chat_id) if body.report_chat_id is not None else None
+        if report_chat_id is not None:
+            await ensure_report_chat_reachable(report_chat_id)
+        fields.append("report_chat_id=?")
+        params.append(report_chat_id)
+
+    if body.sunday_report_time is not None:
+        fields.append("sunday_report_time=?")
+        params.append(body.sunday_report_time.strip())
+
+    if body.month_report_time is not None:
+        fields.append("month_report_time=?")
+        params.append(body.month_report_time.strip())
+
+    if body.timezone is not None:
+        fields.append("timezone=?")
+        params.append(body.timezone.strip())
+
+    if body.ui_theme is not None:
+        fields.append("ui_theme=?")
+        params.append(body.ui_theme.strip())
+
+    if body.daily_expenses_enabled is not None:
+        fields.append("daily_expenses_enabled=?")
+        params.append(1 if body.daily_expenses_enabled else 0)
+
+    if not fields:
+        return {"ok": True}
+
+    params.append(iso_now(CFG.tzinfo()))
+    db_exec(f"UPDATE settings SET {', '.join(fields)}, updated_at=? WHERE id=?;", tuple(params + [int(before["id"])]))
+
+    after = get_settings()
+    log_audit(int(u["id"]), "UPDATE", "settings", int(after["id"]), dict(before), dict(after))
+
+    # reschedule planner
+    reschedule_jobs()
+    return {"ok": True}
+
+
+# ---------------------------
+# Reports (manual trigger via API)
+# ---------------------------
+
+@APP.post("/api/reports/sunday")
+async def api_report_sunday(u: sqlite3.Row = Depends(require_role("admin", "accountant"))):
+    s = get_settings()
+    recipients = list_report_recipients(s)
+    if not recipients:
+        raise HTTPException(status_code=400, detail="No report recipients configured")
+
+    tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
+    today = dt.datetime.now(tzinfo).date()
+    text, kb = build_sunday_report_text(today)
+    await send_report_to_recipients(text, kb, recipients, raise_on_error=True)
+    return {"ok": True}
+
+
+
+@APP.post("/api/reports/month_expenses")
+async def api_report_month_expenses(u: sqlite3.Row = Depends(require_role("admin", "accountant"))):
+    s = get_settings()
+    recipients = list_report_recipients(s)
+    if not recipients:
+        raise HTTPException(status_code=400, detail="No report recipients configured")
+
+    tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
+    today = dt.datetime.now(tzinfo).date()
+    text, kb = build_month_expenses_report_text(today)
+    await send_report_to_recipients(text, kb, recipients, raise_on_error=True)
+    return {"ok": True}
+
+@APP.post("/api/reports/test")
+async def api_report_test(u: sqlite3.Row = Depends(require_role("admin", "accountant"))):
+    s = get_settings()
+    recipients = list_report_recipients(s)
+    if not recipients:
+        raise HTTPException(status_code=400, detail="No report recipients configured")
+
+    tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
+    now = dt.datetime.now(tzinfo)
+    text = (
+        "✅ Тестовый отчёт\n"
+        f"Если вы это видите, доставка работает.\n"
+        f"Время: {now:%Y-%m-%d %H:%M:%S %Z}"
+    )
+    await send_report_to_recipients(text, None, recipients, raise_on_error=True)
+    return {"ok": True}
+
+
+# ---------------------------
+# Export
+# ---------------------------
+
+@APP.get("/api/export/csv")
+def export_csv(
+    month_id: int = Query(...),
+    u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    m = get_month_by_id(month_id)
+    services = db_fetchall("SELECT * FROM services WHERE month_id=? ORDER BY service_date ASC;", (month_id,))
+    expenses = db_fetchall("SELECT * FROM expenses WHERE month_id=? ORDER BY expense_date ASC, id ASC;", (month_id,))
+
+    import io
+    import csv
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+
+    w.writerow(["MONTH", int(m["year"]), int(m["month"])])
+    w.writerow([])
+    w.writerow(["SERVICES"])
+    w.writerow(["date", "idx", "cashless", "cash", "total", "weekly_min_needed", "mnsps_status", "pvs_ratio", "income_type"])
+    for s in services:
+        w.writerow([
+            s["service_date"], s["idx"], s["cashless"], s["cash"], s["total"],
+            s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"], s["income_type"]
+        ])
+
+    w.writerow([])
+    w.writerow(["EXPENSES"])
+    w.writerow(["date", "category", "title", "qty", "unit_amount", "total", "comment", "is_system"])
+    for e in expenses:
+        w.writerow([
+            e["expense_date"], e["category"], e["title"], e["qty"], e["unit_amount"],
+            e["total"], e["comment"], e["is_system"]
+        ])
+
+    data = buf.getvalue().encode("utf-8-sig")
+    filename = f"month_{m['year']}_{m['month']:02d}.csv"
+    return Response(
+        content=data,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@APP.get("/api/export/excel")
+def export_excel(
+    year: int = Query(...),
+    u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    if openpyxl is None:
+        raise HTTPException(status_code=500, detail="openpyxl is not installed")
+
+    months = db_fetchall("SELECT * FROM months WHERE year=? ORDER BY month ASC;", (year,))
+    wb = openpyxl.Workbook()
+    # remove default
+    wb.remove(wb.active)
+
+    for m in months:
+        month_id = int(m["id"])
+        ensure_tithe_expense(month_id, user_id=int(u["id"]))
+        recalc_services_for_month(month_id)
+
+        ws = wb.create_sheet(title=f"{int(m['month']):02d}-{int(m['year'])}")
+        ws.append(["Month", int(m["year"]), int(m["month"])])
+        ws.append(["monthly_min_needed", float(m["monthly_min_needed"]), "start_balance", float(m["start_balance"])])
+        ws.append([])
+
+        ws.append(["SERVICES"])
+        ws.append(["date", "idx", "cashless", "cash", "total", "weekly_min_needed", "mnsps_status", "pvs_ratio", "income_type"])
+        services = db_fetchall("SELECT * FROM services WHERE month_id=? ORDER BY service_date ASC;", (month_id,))
+        for s in services:
+            ws.append([
+                s["service_date"], s["idx"], s["cashless"], s["cash"], s["total"],
+                s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"], s["income_type"]
+            ])
+
+        ws.append([])
+        ws.append(["EXPENSES"])
+        ws.append(["date", "category", "title", "qty", "unit_amount", "total", "comment", "is_system"])
+        expenses = db_fetchall("SELECT * FROM expenses WHERE month_id=? ORDER BY expense_date ASC, id ASC;", (month_id,))
+        for e in expenses:
+            ws.append([
+                e["expense_date"], e["category"], e["title"], e["qty"], e["unit_amount"], e["total"], e["comment"], e["is_system"]
+            ])
+
+        # simple width
+        for col in range(1, 10):
+            ws.column_dimensions[get_column_letter(col)].width = 18
+
+    import io
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    filename = f"export_{year}.xlsx"
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---------------------------
+# Run (local)
+# ---------------------------
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app:APP",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        reload=False,
+        log_level="info",
+    )
