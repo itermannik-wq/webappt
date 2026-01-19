@@ -1152,6 +1152,9 @@
                 <button id="sendExpensesNowBtn" class="btn small" type="button">
                   <span class="icon">send</span> Расходы сейчас
                 </button>
+                <button id="sendTestReportBtn" class="btn small" type="button">
+                  <span class="icon">check_circle</span> Тест отправки отчёта
+                </button>
               </div>
               <div class="tiny muted2">Важно: chat_id должен быть установлен заранее.</div>
             </div>
@@ -2539,7 +2542,7 @@
 
       // Admin-only controls
       const adminOnlyIds = [
-        "setChatId","setSundayTime","setDailyTime","setDailyEnabled","saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn",
+        "setChatId","setSundayTime","setDailyTime","setDailyEnabled","saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn","sendTestReportBtn",
         "setMonthlyMin","setSundaysOverride","setStartBalance","setTimezone","saveMonthSettingsBtn"
       ];
       adminOnlyIds.forEach(id=>{
@@ -2547,7 +2550,7 @@
         if (el) el.closest(".field")?.classList.toggle("hidden", !isAdmin);
       });
       // Admin-only buttons in reports block
-      ["saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn","saveMonthSettingsBtn"].forEach(id=>{
+      ["saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn","sendTestReportBtn","saveMonthSettingsBtn"].forEach(id=>{
         const el = $("#"+id);
         if (el) el.classList.toggle("hidden", !isAdmin);
       });
@@ -2777,7 +2780,7 @@
         try{ await createMonthIfAdmin(); } catch(e){ alert(String(e.message||e)); }
       });
       $("#yearCollectionToggle").addEventListener("click", ()=>{
-        const isExpanded = !$("#yearCollectionBody").classList.contains("hidden");
+        const isExpanded = $("#yearCollection").classList.contains("expanded");
         setYearCollectionExpanded(!isExpanded);
       });
 
@@ -2882,6 +2885,9 @@
       $("#sendExpensesNowBtn").addEventListener("click", async ()=>{
         try{ await API.post("/api/reports/month_expenses", {}); setToast("Отправлено"); } catch(e){ alert(String(e.message||e)); }
       });
+      $("#sendTestReportBtn").addEventListener("click", async ()=>{
+        try{ await API.post("/api/reports/test", {}); setToast("Тест отправлен"); } catch(e){ alert(String(e.message||e)); }
+      });
 
       $("#saveMonthSettingsBtn").addEventListener("click", async ()=>{
         try{
@@ -2983,4 +2989,3 @@
   </script>
 </body>
 </html>
-
