@@ -187,6 +187,7 @@ def init_db() -> None:
             weekly_min_needed REAL NOT NULL DEFAULT 0,
             mnsps_status TEXT NOT NULL DEFAULT 'Не собрана',
             pvs_ratio REAL NOT NULL DEFAULT 0,
+            income_type TEXT NOT NULL DEFAULT 'donation',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE(month_id, service_date),
@@ -272,6 +273,10 @@ def init_db() -> None:
             """,
             (None, "18:00", "21:00", CFG.TZ, "auto", 0, now, now),
         )
+
+    if not table_has_column("services", "income_type"):
+        db_exec("ALTER TABLE services ADD COLUMN income_type TEXT NOT NULL DEFAULT 'donation';")
+    db_exec("UPDATE services SET income_type='donation' WHERE income_type IS NULL OR income_type='';")
 
 
 def iso_now(tz: ZoneInfo) -> str:
@@ -584,21 +589,35 @@ def recalc_services_for_month(month_id: int) -> None:
         cashless = float(s["cashless"] or 0.0)
         cash = float(s["cash"] or 0.0)
         total = round(cashless + cash, 2)
-        status = "Собрана" if (weekly_min and total > weekly_min) else "Не собрана"
-        pvs = (total / weekly_min) if weekly_min else 0.0
+        income_type = str(s["income_type"] or "donation")
+        if income_type == "donation":
+            status = "Собрана" if (weekly_min and total > weekly_min) else "Не собрана"
+            pvs = (total / weekly_min) if weekly_min else 0.0
+            weekly_min_for_row = weekly_min
+        else:
+            status = "Иной доход"
+            pvs = 0.0
+            weekly_min_for_row = 0.0
         db_exec(
             """
             UPDATE services
             SET total=?, weekly_min_needed=?, mnsps_status=?, pvs_ratio=?, updated_at=?
             WHERE id=?;
             """,
-            (total, weekly_min, status, pvs, now, s["id"]),
+            (total, weekly_min_for_row, status, pvs, now, s["id"]),
         )
 
     # Update idx sequentially by date
-    services2 = db_fetchall("SELECT id FROM services WHERE month_id=? ORDER BY service_date ASC;", (month_id,))
+    services2 = db_fetchall(
+        "SELECT id FROM services WHERE month_id=? AND income_type='donation' ORDER BY service_date ASC;",
+        (month_id,),
+    )
     for i, row in enumerate(services2, start=1):
         db_exec("UPDATE services SET idx=? WHERE id=?;", (i, row["id"]))
+    db_exec(
+        "UPDATE services SET idx=0 WHERE month_id=? AND (income_type!='donation' OR income_type IS NULL);",
+        (month_id,),
+    )
 
 
 def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
@@ -615,7 +634,17 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
     m = get_month_by_id(month_id)
     year, month = int(m["year"]), int(m["month"])
     tithe_date = last_day_of_month(year, month)
-    income_sum = float(db_fetchone("SELECT COALESCE(SUM(total),0) AS s FROM services WHERE month_id=?;", (month_id,))["s"])
+    income_sum = float(
+        db_fetchone(
+            """
+            SELECT COALESCE(SUM(total),0) AS s
+            FROM services
+            WHERE month_id=?
+              AND (income_type='donation' OR income_type IS NULL)
+            """,
+            (month_id,),
+        )["s"]
+    )
     tithe_amount = round(income_sum * 0.10, 2)
 
     existing = db_fetchone(
@@ -697,7 +726,11 @@ def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str,
 
     # avg_sunday: avg services.total where total>0
     row = db_fetchone(
-        "SELECT AVG(total) AS a FROM services WHERE month_id=? AND total>0;",
+        """
+        SELECT AVG(total) AS a
+        FROM services
+        WHERE month_id=? AND total>0 AND (income_type='donation' OR income_type IS NULL);
+        """,
         (month_id,),
     )
     avg_sunday = float(row["a"]) if row and row["a"] is not None else 0.0
@@ -957,6 +990,7 @@ class ServiceIn(BaseModel):
     service_date: dt.date
     cashless: float = 0.0
     cash: float = 0.0
+    income_type: str = "donation"
 
 
 class ExpenseIn(BaseModel):
@@ -1150,11 +1184,12 @@ async def send_report_to_recipients(
         return
     errors: List[str] = []
     for chat_id in recipients:
+        safe_markup = reply_markup if is_allowed_telegram_user(chat_id) else None
         try:
             if raise_on_error:
-                await bot_send_or_http_error(chat_id, text, reply_markup)
+                await bot_send_or_http_error(chat_id, text, safe_markup)
             else:
-                await bot_send_safe(chat_id, text, reply_markup)
+                await bot_send_safe(chat_id, text, safe_markup)
         except HTTPException as exc:
             errors.append(f"{chat_id}: {exc.detail}")
     if errors and raise_on_error:
@@ -1487,7 +1522,13 @@ def build_sunday_report_text(today: dt.date) -> Tuple[str, InlineKeyboardMarkup]
     recalc_services_for_month(month_id)
     ensure_tithe_expense(month_id, user_id=None)
 
-    service = db_fetchone("SELECT * FROM services WHERE month_id=? AND service_date=?;", (month_id, s_date.isoformat()))
+    service = db_fetchone(
+        """
+        SELECT * FROM services
+        WHERE month_id=? AND service_date=? AND (income_type='donation' OR income_type IS NULL);
+        """,
+        (month_id, s_date.isoformat()),
+    )
     cashless = float(service["cashless"]) if service else 0.0
     cash = float(service["cash"]) if service else 0.0
     total = float(service["total"]) if service else 0.0
@@ -1953,15 +1994,24 @@ def create_service(
     cashless = float(body.cashless)
     cash = float(body.cash)
     total = round(cashless + cash, 2)
+    income_type = (body.income_type or "donation").strip().lower()
+    if income_type not in ("donation", "other"):
+        raise HTTPException(status_code=400, detail="Invalid income_type")
+
+    if before and str(before["income_type"] or "donation") != income_type:
+        raise HTTPException(
+            status_code=409,
+            detail="Service already exists for this date with another income type",
+        )
 
     if before:
         db_exec(
             """
             UPDATE services
-            SET cashless=?, cash=?, total=?, updated_at=?
+            SET cashless=?, cash=?, total=?, income_type=?, updated_at=?
             WHERE id=?;
             """,
-            (cashless, cash, total, now, before["id"]),
+            (cashless, cash, total, income_type, now, before["id"]),
         )
         after = db_fetchone("SELECT * FROM services WHERE id=?;", (before["id"],))
         log_audit(int(u["id"]), "UPDATE", "service", int(before["id"]), dict(before), dict(after) if after else None)
@@ -1973,11 +2023,11 @@ def create_service(
         """
         INSERT INTO services (
             month_id, service_date, idx, cashless, cash, total,
-            weekly_min_needed, mnsps_status, pvs_ratio,
+            weekly_min_needed, mnsps_status, pvs_ratio, income_type,
             created_at, updated_at
-        ) VALUES (?, ?, 1, ?, ?, ?, 0, 'Не собрана', 0, ?, ?);
+        ) VALUES (?, ?, 0, ?, ?, ?, 0, 'Не собрана', 0, ?, ?, ?);
         """,
-        (month_id, service_date, cashless, cash, total, now, now),
+        (month_id, service_date, cashless, cash, total, income_type, now, now),
     )
     after = db_fetchone("SELECT * FROM services WHERE id=?;", (new_id,))
     log_audit(int(u["id"]), "CREATE", "service", int(new_id), None, dict(after) if after else None)
@@ -2003,14 +2053,24 @@ def update_service(
     cashless = float(body.cashless)
     cash = float(body.cash)
     total = round(cashless + cash, 2)
+    income_type = (body.income_type or "donation").strip().lower()
+    if income_type not in ("donation", "other"):
+        raise HTTPException(status_code=400, detail="Invalid income_type")
+    new_date = body.service_date.isoformat()
+    existing = db_fetchone(
+        "SELECT id FROM services WHERE month_id=? AND service_date=?;",
+        (int(before["month_id"]), new_date),
+    )
+    if existing and int(existing["id"]) != int(service_id):
+        raise HTTPException(status_code=409, detail="Service date already exists")
 
     db_exec(
         """
         UPDATE services
-        SET service_date=?, cashless=?, cash=?, total=?, updated_at=?
+        SET service_date=?, cashless=?, cash=?, total=?, income_type=?, updated_at=?
         WHERE id=?;
         """,
-        (body.service_date.isoformat(), cashless, cash, total, now, service_id),
+        (new_date, cashless, cash, total, income_type, now, service_id),
     )
     after = db_fetchone("SELECT * FROM services WHERE id=?;", (service_id,))
     log_audit(int(u["id"]), "UPDATE", "service", service_id, dict(before), dict(after) if after else None)
@@ -2287,11 +2347,11 @@ def export_csv(
     w.writerow(["MONTH", int(m["year"]), int(m["month"])])
     w.writerow([])
     w.writerow(["SERVICES"])
-    w.writerow(["date", "idx", "cashless", "cash", "total", "weekly_min_needed", "mnsps_status", "pvs_ratio"])
+    w.writerow(["date", "idx", "cashless", "cash", "total", "weekly_min_needed", "mnsps_status", "pvs_ratio", "income_type"])
     for s in services:
         w.writerow([
             s["service_date"], s["idx"], s["cashless"], s["cash"], s["total"],
-            s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"]
+            s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"], s["income_type"]
         ])
 
     w.writerow([])
@@ -2336,12 +2396,12 @@ def export_excel(
         ws.append([])
 
         ws.append(["SERVICES"])
-        ws.append(["date", "idx", "cashless", "cash", "total", "weekly_min_needed", "mnsps_status", "pvs_ratio"])
+        ws.append(["date", "idx", "cashless", "cash", "total", "weekly_min_needed", "mnsps_status", "pvs_ratio", "income_type"])
         services = db_fetchall("SELECT * FROM services WHERE month_id=? ORDER BY service_date ASC;", (month_id,))
         for s in services:
             ws.append([
                 s["service_date"], s["idx"], s["cashless"], s["cash"], s["total"],
-                s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"]
+                s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"], s["income_type"]
             ])
 
         ws.append([])
@@ -2383,3 +2443,4 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
+
