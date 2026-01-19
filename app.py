@@ -358,6 +358,7 @@ def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
         ALLOWLIST_CACHE = allow
         ALLOWLIST_MTIME = mtime
         return ALLOWLIST_CACHE
+    return ALLOWLIST_CACHE
 
 def register_bot_subscriber(telegram_id: int) -> None:
     now = iso_now(CFG.tzinfo())
@@ -385,10 +386,23 @@ def list_report_recipients(settings_row: Optional[sqlite3.Row] = None) -> List[i
     chat_id = s["report_chat_id"]
     if chat_id:
         ids.add(int(chat_id))
-    rows = db_fetchall("SELECT telegram_id FROM bot_subscribers WHERE active=1;")
+    allow = refresh_allowlist_if_needed()
+    allowed_ids = {tid for tid, u in allow.items() if u.get("active") is True}
+    if allowed_ids:
+        placeholders = ",".join("?" for _ in allowed_ids)
+        rows = db_fetchall(
+            f"""
+            SELECT telegram_id
+            FROM bot_subscribers
+            WHERE active=1
+              AND telegram_id IN ({placeholders});
+            """,
+            tuple(allowed_ids),
+        )
+    else:
+        rows = []
     ids.update(int(r["telegram_id"]) for r in rows)
     return sorted(ids)
-
 # ---------------------------
 # Session token (HMAC signed JSON) - self-contained (no external JWT deps)
 # ---------------------------
@@ -1150,8 +1164,6 @@ async def send_report_to_recipients(
 @router.message(Command("start"))
 async def on_start(m: Message):
     tid = m.from_user.id if m.from_user else 0
-    if tid:
-        register_bot_subscriber(tid)
     if not tid or not is_allowed_telegram_user(tid):
         await m.answer(
             "Доступ запрещён. Ваш Telegram ID не в allowlist.\n"
@@ -1159,6 +1171,8 @@ async def on_start(m: Message):
             "Добавьте его в users.json и повторите /start."
         )
         return
+    if tid:
+        register_bot_subscriber(tid)
 
     role = get_user_role_from_db(tid)
     await m.answer(
@@ -2369,5 +2383,3 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
-
-
