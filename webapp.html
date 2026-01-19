@@ -944,7 +944,7 @@
       <!-- Donation form -->
       <div id="addDonationWrap">
         <div class="card bigCard">
-          <div class="rowBetween">
+          <div id="donSundayWrap" class="rowBetween">
             <div class="small muted">Дата (воскресенье)</div>
             <div class="row" style="gap:8px;">
               <button id="sunPrev" class="btnIcon" type="button" aria-label="Предыдущее воскресенье">
@@ -956,10 +956,21 @@
               </button>
             </div>
           </div>
+          <div id="donOtherDateWrap" class="field hidden" style="margin-top:8px;">
+            <label>Дата дохода</label>
+            <input id="donOtherDate" class="input" type="date" />
+          </div>
 
           <div class="spacer12"></div>
 
           <div class="form">
+            <div class="field">
+              <label>Тип дохода</label>
+              <select id="donIncomeType" class="input">
+                <option value="donation">Пожертвование (10% Объединение)</option>
+                <option value="other">Иной доход (без 10%)</option>
+              </select>
+            </div>
             <div class="field">
               <label>Безнал</label>
               <input id="donCashless" class="input" type="number" inputmode="decimal" placeholder="0.00" />
@@ -1117,8 +1128,8 @@
       </div>
 
       <div id="settingsWrap" class="hidden">
-        <div class="section">
-          <div class="sectionHeader"><h3>Отчёты</h3></div>
+        <div class="section" id="themeSection">
+          <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
           <div class="card bigCard">
             <div class="form">
               <div class="field">
@@ -1190,6 +1201,26 @@
               <button id="saveMonthSettingsBtn" class="btn primary" type="button">
                 <span class="icon">tune</span> Сохранить месяц
               </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="sectionHeader"><h3>Тема интерфейса</h3></div>
+          <div class="card bigCard">
+            <div class="form">
+              <div class="field">
+                <label>Тема</label>
+                <select id="setTheme" class="input">
+                  <option value="auto">Системная</option>
+                  <option value="light">Светлая</option>
+                  <option value="dark">Тёмная</option>
+                </select>
+              </div>
+              <button id="saveThemeBtn" class="btn primary" type="button">
+                <span class="icon">palette</span> Сохранить тему
+              </button>
+              <div class="tiny muted2">Изменение темы влияет на всех пользователей.</div>
             </div>
           </div>
         </div>
@@ -1334,31 +1365,49 @@
      * Telegram init + theme
      **********************/
     const tg = window.Telegram?.WebApp;
+    const ThemeState = {
+      mode: "auto",
+      media: window.matchMedia?.("(prefers-color-scheme: dark)")
+    };
+
+    function detectTelegramTheme(){
+      const p = tg?.themeParams || {};
+      if (!p.bg_color) return null;
+      const hex = p.bg_color.replace("#","");
+      if (hex.length !== 6) return null;
+      const r = parseInt(hex.slice(0,2),16);
+      const g = parseInt(hex.slice(2,4),16);
+      const b = parseInt(hex.slice(4,6),16);
+      const lum = 0.2126*r + 0.7152*g + 0.0722*b;
+      return (lum > 180) ? "light" : "dark";
+    }
+
+    function applyTheme(mode){
+      const normalized = (mode || "auto").toLowerCase();
+      ThemeState.mode = (normalized === "system") ? "auto" : normalized;
+      let theme = ThemeState.mode;
+      if (theme === "auto") {
+        theme = detectTelegramTheme() || (ThemeState.media?.matches ? "dark" : "light");
+      }
+      document.documentElement.dataset.theme = theme;
+    }
+
     if (tg) {
       tg.ready();
       tg.expand();
-      // In case theme params exist, align accent a bit
+      // apply Telegram colors as CSS vars where safe
       try {
         const p = tg.themeParams || {};
-        // choose theme by bg_color brightness
-        if (p.bg_color) {
-          // simple heuristic: if bg is light, switch to light
-          const hex = p.bg_color.replace("#","");
-          if (hex.length === 6) {
-            const r = parseInt(hex.slice(0,2),16);
-            const g = parseInt(hex.slice(2,4),16);
-            const b = parseInt(hex.slice(4,6),16);
-            const lum = 0.2126*r + 0.7152*g + 0.0722*b;
-            document.documentElement.dataset.theme = (lum > 180) ? "light" : "dark";
-          }
-        }
-        // apply Telegram colors as CSS vars where safe
         const root = document.documentElement.style;
         if (p.text_color) root.setProperty("--text", hexToRgba(p.text_color, .92));
         if (p.hint_color) root.setProperty("--muted", hexToRgba(p.hint_color, .72));
         if (p.secondary_bg_color) root.setProperty("--card", hexToRgba(p.secondary_bg_color, .55));
       } catch {}
     }
+
+    ThemeState.media?.addEventListener?.("change", ()=>{
+      if (ThemeState.mode === "auto") applyTheme("auto");
+    });
 
     function hexToRgba(hex, a){
       try{
@@ -1456,6 +1505,7 @@
 
       sundayDates: [],
       sundayIndex: 0,
+      otherIncomeDate: null,
 
       charts: {
         sundayBar: null,
@@ -1904,9 +1954,28 @@
       $("#addSundayBtn").style.opacity = canEdit ? "1" : ".55";
     }
 
+    function applyRoleUI(){
+      const canEdit = (State.role === "admin" || State.role === "accountant");
+      const isViewer = State.role === "viewer";
+      const addBtn = $(".navBtn[data-screen='add']");
+      if (addBtn) addBtn.style.display = canEdit ? "" : "none";
+      $("#navSettingsBtn").style.opacity = (State.role==="viewer") ? ".55" : "1";
+      $("#createMonthBtn").disabled = State.role !== "admin";
+      $("#createMonthBtn").style.opacity = (State.role === "admin") ? "1" : ".55";
+      updateAddButtonsByRole();
+      if (isViewer) {
+        $("#tabDonation").disabled = true;
+        $("#tabExpense").disabled = true;
+      }
+    }
+
     function renderSundayChart(){
       const sundays = State.sundayDates;
-      const servicesByDate = new Map(State.services.map(s=>[s.service_date, s]));
+      const servicesByDate = new Map(
+        State.services
+          .filter(s=> (s.income_type || "donation") === "donation")
+          .map(s=>[s.service_date, s])
+      );
 
       const labels = sundays.map((d,i)=>String(i+1));
       const data = sundays.map(d => {
@@ -2109,7 +2178,7 @@
       if (q) {
         items = items.filter(x=>{
           const hay = State.historyMode === "don"
-            ? `${x.service_date} ${x.idx} ${x.mnsps_status}`
+            ? `${x.service_date} ${x.idx} ${x.mnsps_status} ${x.income_type || "donation"}`
             : `${x.title||""} ${x.comment||""} ${x.category||""} ${x.expense_date||""}`;
           return hay.toLowerCase().includes(q);
         });
@@ -2144,16 +2213,22 @@
 
     function makeDonationItem(s){
       const total = Number(s.total||0);
-      const ok = (s.weekly_min_needed && total > Number(s.weekly_min_needed));
-      const iconName = ok ? "volunteer_activism" : (total>0 ? "info" : "event_busy");
-      const sub = `${fmtLongDate(s.service_date)} • ${s.mnsps_status} • ПВС ${(Number(s.pvs_ratio||0)*100).toFixed(1)}%`;
+      const incomeType = (s.income_type || "donation");
+      const isDonation = incomeType === "donation";
+      const ok = (isDonation && s.weekly_min_needed && total > Number(s.weekly_min_needed));
+      const iconName = isDonation
+        ? (ok ? "volunteer_activism" : (total>0 ? "info" : "event_busy"))
+        : "paid";
+      const sub = isDonation
+        ? `${fmtLongDate(s.service_date)} • ${s.mnsps_status} • ПВС ${(Number(s.pvs_ratio||0)*100).toFixed(1)}%`
+        : `${fmtLongDate(s.service_date)} • Иной доход`;
       const div = document.createElement("div");
       div.className = "item";
       div.innerHTML = `
         <div class="itemLeft">
           <div class="itemIco"><span class="icon">${iconName}</span></div>
           <div class="itemText">
-            <div class="t">Воскресенье #${s.idx || "—"}</div>
+            <div class="t">${isDonation ? `Воскресенье #${s.idx || "—"}` : "Иной доход"}</div>
             <div class="s">${sub}</div>
           </div>
         </div>
@@ -2200,6 +2275,21 @@
     /**********************
      * Add: Donation form helpers
      **********************/
+    function getDonationType(){
+      return ($("#donIncomeType").value || "donation").trim();
+    }
+
+    function setDonationTypeUI(){
+      const type = getDonationType();
+      const isDonation = type === "donation";
+      $("#donSundayWrap").classList.toggle("hidden", !isDonation);
+      $("#donOtherDateWrap").classList.toggle("hidden", isDonation);
+      if (!isDonation && !$("#donOtherDate").value) {
+        $("#donOtherDate").value = State.otherIncomeDate || toIsoDateLocal(new Date());
+      }
+      updateDonationDateUI();
+    }
+
     function selectDonationSundayByDate(dateIso){
       const idx = State.sundayDates.indexOf(dateIso);
       if (idx >= 0) {
@@ -2209,11 +2299,19 @@
     }
 
     function updateDonationDateUI(){
-      const d = State.sundayDates[State.sundayIndex];
-      $("#sunDateLabel").textContent = d ? fmtLongDate(d) : "—";
+      const type = getDonationType();
+      const isDonation = type === "donation";
+      let d = isDonation ? State.sundayDates[State.sundayIndex] : $("#donOtherDate").value;
+      if (!isDonation && !d) {
+        d = State.otherIncomeDate || toIsoDateLocal(new Date());
+        $("#donOtherDate").value = d;
+      }
+      if (isDonation) {
+        $("#sunDateLabel").textContent = d ? fmtLongDate(d) : "—";
+      }
 
       // prefill from existing service
-      const svc = State.services.find(x=>x.service_date === d);
+      const svc = State.services.find(x=>x.service_date === d && (x.income_type || "donation") === type);
       const cashless = svc ? Number(svc.cashless||0) : 0;
       const cash = svc ? Number(svc.cash||0) : 0;
       $("#donCashless").value = cashless ? String(cashless) : "";
@@ -2227,16 +2325,21 @@
       const total = Math.round((cashless + cash) * 100)/100;
       $("#donTotal").value = fmtMoney(total);
 
-      const weeklyMin = Number(State.summary?.weekly_min_needed || 0);
+      const type = getDonationType();
+      const isDonation = type === "donation";
+      const weeklyMin = isDonation ? Number(State.summary?.weekly_min_needed || 0) : 0;
       $("#donWeeklyMin").textContent = weeklyMin ? fmtMoney(weeklyMin) : "—";
 
       let status = "—";
       let cls = "";
-      if (weeklyMin > 0) {
+      if (isDonation && weeklyMin > 0) {
         if (total > weeklyMin) { status="Собрана"; cls="ok"; }
         else { status="Не собрана"; cls=(total>0?"warn":"bad"); }
         const pvs = total / weeklyMin;
         $("#donPvs").textContent = `${(pvs*100).toFixed(1)}%`;
+      } else if (!isDonation) {
+        status = "Иной доход";
+        $("#donPvs").textContent = "—";
       } else {
         $("#donPvs").textContent = "—";
       }
@@ -2248,10 +2351,11 @@
     }
 
     async function copyPreviousSunday(){
+      if (getDonationType() !== "donation") return;
       const idx = State.sundayIndex;
       if (idx <= 0) return;
       const prevDate = State.sundayDates[idx-1];
-      const prev = State.services.find(x=>x.service_date === prevDate);
+      const prev = State.services.find(x=>x.service_date === prevDate && (x.income_type || "donation") === "donation");
       if (!prev) return;
       $("#donCashless").value = String(Number(prev.cashless||0));
       $("#donCash").value = String(Number(prev.cash||0));
@@ -2341,6 +2445,7 @@
       $("#tabExpense").classList.toggle("active", !isDon);
       $("#addDonationWrap").classList.toggle("hidden", !isDon);
       $("#addExpenseWrap").classList.toggle("hidden", isDon);
+      if (isDon) setDonationTypeUI();
     }
 
     function setHistoryTab(which){
@@ -2361,7 +2466,10 @@
     function openEditModal(type, item){
       Edit.type = type;
       Edit.item = JSON.parse(JSON.stringify(item)); // clone
-      $("#editTitle").textContent = (type==="service") ? "Пожертвование" : "Расход";
+      const serviceType = (type === "service") ? (item.income_type || "donation") : null;
+      $("#editTitle").textContent = (type==="service")
+        ? (serviceType === "donation" ? "Пожертвование" : "Иной доход")
+        : "Расход";
       $("#editHint").textContent = "";
 
       // build form
@@ -2381,9 +2489,20 @@
       if (isSystem) $("#editHint").textContent = "Системная строка (десятина) редактируется автоматически.";
 
       if (type==="service"){
-        body.appendChild(makeField("Дата", makeInput("date", item.service_date)));
-        body.appendChild(makeField("Безнал", makeInput("number", item.cashless, {step:"0.01"})));
-        body.appendChild(makeField("Наличные", makeInput("number", item.cash, {step:"0.01"})));
+        body.appendChild(makeField("Дата", makeInput("date", item.service_date, {field:"service_date"})));
+        body.appendChild(makeField(
+          "Тип дохода",
+          makeSelect(
+            [
+              {value:"donation", label:"Пожертвование (10% Объединение)"},
+              {value:"other", label:"Иной доход (без 10%)"},
+            ],
+            item.income_type || "donation",
+            {field:"income_type"}
+          )
+        ));
+        body.appendChild(makeField("Безнал", makeInput("number", item.cashless, {step:"0.01", field:"cashless"})));
+        body.appendChild(makeField("Наличные", makeInput("number", item.cash, {step:"0.01", field:"cash"})));
         const total = Number(item.cashless||0) + Number(item.cash||0);
         body.appendChild(makeField("Итого", makeInput("text", fmtMoney(total), {readonly:true})));
       } else {
@@ -2421,7 +2540,22 @@
       i.type = type;
       if (value !== undefined && value !== null) i.value = String(value);
       Object.assign(i, opts);
+      if (opts.field) i.dataset.field = opts.field;
       return i;
+    }
+    function makeSelect(options, value, opts={}){
+      const s = document.createElement("select");
+      s.className = "input";
+      if (opts.field) s.dataset.field = opts.field;
+      options.forEach(opt=>{
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        s.appendChild(o);
+      });
+      if (value !== undefined && value !== null) s.value = String(value);
+      Object.assign(s, opts);
+      return s;
     }
     function makeTextarea(value){
       const t = document.createElement("textarea");
@@ -2436,13 +2570,16 @@
       const canEdit = (State.role === "admin" || State.role === "accountant");
       if (!canEdit) return;
 
-      const controls = $$("#editBody .input");
       if (Edit.type === "service"){
-        const [dateI, cashlessI, cashI] = controls;
+        const dateI = $("#editBody .input[data-field='service_date']");
+        const typeI = $("#editBody .input[data-field='income_type']");
+        const cashlessI = $("#editBody .input[data-field='cashless']");
+        const cashI = $("#editBody .input[data-field='cash']");
         const body = {
           service_date: dateI.value,
           cashless: Number(cashlessI.value||0),
-          cash: Number(cashI.value||0)
+          cash: Number(cashI.value||0),
+          income_type: (typeI?.value || "donation")
         };
         await API.put(`/api/services/${Edit.item.id}`, body);
         closeEditModal();
@@ -2453,6 +2590,7 @@
 
       // expense
       if (Number(Edit.item.is_system||0) === 1) return;
+      const controls = $$("#editBody .input");
       const [dateI, catI, titleI, qtyI, unitI, totalI, commentI] = controls;
       const body = {
         expense_date: dateI.value,
@@ -2499,7 +2637,15 @@
         // Duplicate to same date (noop) doesn't make sense; instead copy values into add form
         switchScreen("add");
         setAddTab("don");
-        selectDonationSundayByDate(Edit.item.service_date);
+        $("#donIncomeType").value = (Edit.item.income_type || "donation");
+        setDonationTypeUI();
+        if ((Edit.item.income_type || "donation") === "donation") {
+          selectDonationSundayByDate(Edit.item.service_date);
+        } else {
+          $("#donOtherDate").value = Edit.item.service_date;
+          State.otherIncomeDate = Edit.item.service_date;
+          updateDonationDateUI();
+        }
         $("#donCashless").value = String(Number(Edit.item.cashless||0));
         $("#donCash").value = String(Number(Edit.item.cash||0));
         recalcDonationTotals();
@@ -2525,8 +2671,8 @@
       await refreshAll();
     }
 
-    /**********************
-     * Settings UI
+    /**********************␊
+     * Settings UI␊
      **********************/
     async function renderSettingsUI(){
       const canSee = (State.role === "admin" || State.role === "accountant");
@@ -2543,17 +2689,19 @@
       // Admin-only controls
       const adminOnlyIds = [
         "setChatId","setSundayTime","setDailyTime","setDailyEnabled","saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn","sendTestReportBtn",
-        "setMonthlyMin","setSundaysOverride","setStartBalance","setTimezone","saveMonthSettingsBtn"
+        "setMonthlyMin","setSundaysOverride","setStartBalance","setTimezone","saveMonthSettingsBtn",
+        "setTheme","saveThemeBtn"
       ];
       adminOnlyIds.forEach(id=>{
         const el = $("#"+id);
         if (el) el.closest(".field")?.classList.toggle("hidden", !isAdmin);
       });
       // Admin-only buttons in reports block
-      ["saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn","sendTestReportBtn","saveMonthSettingsBtn"].forEach(id=>{
+      ["saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn","sendTestReportBtn","saveMonthSettingsBtn","saveThemeBtn"].forEach(id=>{
         const el = $("#"+id);
         if (el) el.classList.toggle("hidden", !isAdmin);
       });
+      $("#themeSection").classList.toggle("hidden", !isAdmin);
 
       // Load server settings for admin
       if (isAdmin){
@@ -2563,6 +2711,7 @@
         $("#setDailyTime").value = (s.month_report_time || "21:00");
         $("#setDailyEnabled").value = s.daily_expenses_enabled ? "1" : "0";
         $("#setTimezone").value = (s.timezone || "Europe/Warsaw");
+        $("#setTheme").value = (s.ui_theme || "auto");
       }
 
       // Month settings (current month)
@@ -2579,6 +2728,13 @@
       $("#templatesJson").value = JSON.stringify(State.templates, null, 2);
     }
 
+    async function loadThemeSetting(){
+      const s = await API.get("/api/settings");
+      applyTheme(s.ui_theme || "auto");
+      const themeSelect = $("#setTheme");
+      if (themeSelect) themeSelect.value = (s.ui_theme || "auto");
+    }
+
     /**********************
      * Actions: Save donation/expense
      **********************/
@@ -2591,7 +2747,9 @@
         alert("У вашей роли нет прав на изменение данных.");
         return;
       }
-      const d = State.sundayDates[State.sundayIndex];
+      const type = getDonationType();
+      const isDonation = type === "donation";
+      const d = isDonation ? State.sundayDates[State.sundayIndex] : $("#donOtherDate").value;
       if (!d) return;
 
       const cashless = Number($("#donCashless").value||0);
@@ -2600,14 +2758,17 @@
       await API.post(`/api/months/${State.monthId}/services`, {
         service_date: d,
         cashless,
-        cash
+        cash,
+        income_type: type
       });
       setToast("Сохранено");
       await refreshAll();
 
       if (andNext){
-        State.sundayIndex = clamp(State.sundayIndex+1, 0, State.sundayDates.length-1);
-        updateDonationDateUI();
+        if (isDonation) {
+          State.sundayIndex = clamp(State.sundayIndex+1, 0, State.sundayDates.length-1);
+          updateDonationDateUI();
+        }
       }
     }
 
@@ -2747,6 +2908,11 @@
             setToast("Нет доступа");
             return;
           }
+          if (screen === "add" && !(State.role === "admin" || State.role === "accountant")){
+            switchScreen("dashboard");
+            setToast("Нет доступа");
+            return;
+          }
           switchScreen(screen);
         });
       });
@@ -2801,6 +2967,11 @@
       // donation recalc
       $("#donCashless").addEventListener("input", recalcDonationTotals);
       $("#donCash").addEventListener("input", recalcDonationTotals);
+      $("#donIncomeType").addEventListener("change", setDonationTypeUI);
+      $("#donOtherDate").addEventListener("change", ()=>{
+        State.otherIncomeDate = $("#donOtherDate").value;
+        updateDonationDateUI();
+      });
 
       // donation chips (active field = focused input)
       let activeDonField = $("#donCashless");
@@ -2866,8 +3037,7 @@
         try{ await duplicateEdit(); } catch(e){ alert(String(e.message||e)); }
       });
 
-      // settings
-      $("#saveSettingsBtn").addEventListener("click", async ()=>{
+      // settings      $("#saveSettingsBtn").addEventListener("click", async ()=>{
         try{
           await API.put("/api/settings", {
             report_chat_id: $("#setChatId").value ? Number($("#setChatId").value) : null,
@@ -2876,6 +3046,15 @@
             daily_expenses_enabled: ($("#setDailyEnabled").value === "1")
           });
           setToast("Сохранено");
+        } catch(e){ alert(String(e.message||e)); }
+      });
+
+      $("#saveThemeBtn").addEventListener("click", async ()=>{
+        try{
+          const theme = ($("#setTheme").value || "auto");
+          await API.put("/api/settings", { ui_theme: theme });
+          applyTheme(theme);
+          setToast("Тема сохранена");
         } catch(e){ alert(String(e.message||e)); }
       });
 
@@ -2933,6 +3112,7 @@
      * Boot
      **********************/
     async function boot(){
+      applyTheme("auto");
       // load templates early
       loadTemplates();
       rebuildTemplateSelect();
@@ -2942,8 +3122,10 @@
       State.year = t.y;
       State.month = t.m;
       setMonthTitle();
+      State.otherIncomeDate = `${t.y}-${String(t.m).padStart(2,"0")}-${String(t.d).padStart(2,"0")}`;
 
       wireEvents();
+      setDonationTypeUI();
 
       // Hide settings tab label for viewer (still present but gated)
       // We'll keep it visible but will block opening.
@@ -2957,8 +3139,13 @@
 
       State.role = API.user?.role || "viewer";
       $("#roleBadge").textContent = `роль: ${State.role}`;
-      // settings tab visibility per role
-      $("#navSettingsBtn").style.opacity = (State.role==="viewer") ? ".55" : "1";
+      applyRoleUI();
+
+      try {
+        await loadThemeSetting();
+      } catch (e) {
+        applyTheme("auto");
+      }
 
       await loadMonthsForYear(State.year);
       await ensureSelectedMonthExists();
@@ -2978,6 +3165,8 @@
       if (["dashboard","add","history","settings"].includes(initialScreen)){
         if (initialScreen === "settings" && State.role === "viewer"){
           setToast("Нет доступа");
+        } else if (initialScreen === "add" && !(State.role === "admin" || State.role === "accountant")) {
+          setToast("Нет доступа");
         } else {
           switchScreen(initialScreen);
           if (initialScreen === "add") setAddTab("don");
@@ -2989,3 +3178,4 @@
   </script>
 </body>
 </html>
+
