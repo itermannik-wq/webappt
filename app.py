@@ -278,6 +278,10 @@ def parse_iso_date(s: str) -> dt.date:
 # Allowlist (users.json) + sync to DB
 # ---------------------------
 
+ALLOWLIST_CACHE: Dict[int, Dict[str, Any]] = {}
+ALLOWLIST_MTIME: Optional[float] = None
+
+
 def load_allowlist() -> Dict[int, Dict[str, Any]]:
     """
     users.json:
@@ -329,10 +333,24 @@ def sync_allowlist_to_db(allow: Dict[int, Dict[str, Any]]) -> None:
                 (u.get("name"), u.get("role", existing["role"]), 1 if u.get("active", True) else 0, tid),
             )
 
+def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
+    global ALLOWLIST_CACHE, ALLOWLIST_MTIME
+    path = CFG.USERS_JSON_PATH
+    try:
+        mtime = os.path.getmtime(path)
+    except FileNotFoundError:
+        mtime = None
+    if mtime != ALLOWLIST_MTIME:
+        allow = load_allowlist()
+        sync_allowlist_to_db(allow)
+        ALLOWLIST_CACHE = allow
+        ALLOWLIST_MTIME = mtime
+    return ALLOWLIST_CACHE
 
 # ---------------------------
 # Session token (HMAC signed JSON) - self-contained (no external JWT deps)
 # ---------------------------
+
 
 def _b64url_encode(raw: bytes) -> str:
     import base64
@@ -916,7 +934,7 @@ PENDING: Dict[int, Dict[str, Any]] = {}  # telegram_id -> payload
 
 
 def is_allowed_telegram_user(telegram_id: int) -> bool:
-    allow = APP.state.allowlist  # type: ignore[name-defined]
+    allow = refresh_allowlist_if_needed()
     u = allow.get(int(telegram_id))
     return bool(u and u.get("active") is True)
 
@@ -1068,7 +1086,11 @@ async def ensure_report_chat_reachable(chat_id: int) -> None:
 async def on_start(m: Message):
     tid = m.from_user.id if m.from_user else 0
     if not tid or not is_allowed_telegram_user(tid):
-        await m.answer("Доступ запрещён. Ваш Telegram ID не в allowlist.")
+        await m.answer(
+            "Доступ запрещён. Ваш Telegram ID не в allowlist.\n"
+            f"Ваш Telegram ID: {tid}\n"
+            "Добавьте его в users.json и повторите /start."
+        )
         return
 
     role = get_user_role_from_db(tid)
@@ -1603,6 +1625,12 @@ async def lifespan(app: FastAPI):
     allow = load_allowlist()
     sync_allowlist_to_db(allow)
     app.state.allowlist = allow
+    global ALLOWLIST_CACHE, ALLOWLIST_MTIME
+    ALLOWLIST_CACHE = allow
+    try:
+        ALLOWLIST_MTIME = os.path.getmtime(CFG.USERS_JSON_PATH)
+    except FileNotFoundError:
+        ALLOWLIST_MTIME = None
 
     # init bot + dp
     global bot, dp
@@ -1678,7 +1706,7 @@ def auth_telegram(body: AuthTelegramIn, request: Request):
     if not telegram_id:
         raise HTTPException(status_code=401, detail="Invalid Telegram user id")
 
-    allow = APP.state.allowlist
+    allow = refresh_allowlist_if_needed()
     allow_user = allow.get(telegram_id)
     if not allow_user or not allow_user.get("active"):
         raise HTTPException(status_code=403, detail="User not in allowlist or inactive")
@@ -2275,4 +2303,5 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
+
 
