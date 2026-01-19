@@ -2091,6 +2091,24 @@ async def api_report_month_expenses(u: sqlite3.Row = Depends(require_role("admin
     return {"ok": True}
 
 
+@APP.post("/api/reports/test")
+async def api_report_test(u: sqlite3.Row = Depends(require_role("admin", "accountant"))):
+    s = get_settings()
+    chat_id = s["report_chat_id"]
+    if not chat_id:
+        raise HTTPException(status_code=400, detail="settings.report_chat_id is not set")
+
+    tzinfo = ZoneInfo(str(s["timezone"] or CFG.TZ))
+    now = dt.datetime.now(tzinfo)
+    text = (
+        "✅ Тестовый отчёт\n"
+        f"Если вы это видите, доставка работает.\n"
+        f"Время: {now:%Y-%m-%d %H:%M:%S %Z}"
+    )
+    await bot_send_safe(int(chat_id), text, None)
+    return {"ok": True}
+
+
 # ---------------------------
 # Export
 # ---------------------------
@@ -2210,3 +2228,4 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
+
