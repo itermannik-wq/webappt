@@ -197,6 +197,24 @@
       object-fit: cover;
       display: block;
     }
+    .attachRemove{
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.35);
+      background: rgba(15,23,42,.7);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      padding: 0;
+    }
+    .attachRemove .icon{
+      font-size: 16px;
+    }
     .attachBadge{
       position: absolute;
       top: 8px;
@@ -411,6 +429,12 @@
       font-size: 12px;
       color: var(--muted);
       white-space: nowrap;
+    }
+    #expWarn{
+      white-space: normal;
+      max-width: 100%;
+      line-height: 1.35;
+      align-items: flex-start;
     }
     .badge.ok{ color: rgba(16,185,129,.95); border-color: rgba(16,185,129,.35); }
     .badge.warn{ color: rgba(245,158,11,.95); border-color: rgba(245,158,11,.35); }
@@ -835,7 +859,7 @@
     }
     #addDonationWrap,
     #addExpenseWrap{
-      padding-bottom: calc(var(--nav-h) + var(--safe-bot) + 140px);
+      padding-bottom: calc(var(--nav-h) + var(--safe-bot) + 220px);
     }
 
     /* Modal */
@@ -1976,7 +2000,19 @@
       setExpenseAttachments(expenseId, items);
       return items;
     }
-    function buildAttachmentThumb(attachment, expenseId){
+    async function deleteAttachment(attachment, expenseId, grid){
+      if (!canEditAttachments()) return false;
+      const ok = confirm("Удалить файл?");
+      if (!ok) return false;
+      await API.del(`/api/attachments/${attachment.id}`);
+      revokeAttachmentBlob(attachment.id);
+      const items = await fetchExpenseAttachments(expenseId);
+      if (grid) renderAttachmentGrid(grid, items, expenseId, {showEmpty:true});
+      await refreshAll();
+      setToast("Удалено");
+      return true;
+    }
+    function buildAttachmentThumb(attachment, expenseId, grid){
       const div = document.createElement("div");
       div.className = "attachThumb";
       const mime = (attachment.mime || "").toLowerCase();
@@ -1992,11 +2028,26 @@
         div.appendChild(img);
         loadAttachmentImage(img, attachment.id);
       }
+      if (canEditAttachments()){
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "attachRemove";
+        removeBtn.innerHTML = `<span class="icon">close</span>`;
+        removeBtn.addEventListener("click", async (e)=>{
+          e.stopPropagation();
+          try{
+            await deleteAttachment(attachment, expenseId, grid);
+          }catch(err){
+            alert(String(err.message || err));
+          }
+        });
+        div.appendChild(removeBtn);
+      }
       div.addEventListener("click", ()=> { void openAttachmentViewer(attachment, expenseId); });
       requestAnimationFrame(()=> div.classList.add("show"));
       return div;
     }
-    function buildQueuedThumb(file){
+    function buildQueuedThumb(file, index){
       const div = document.createElement("div");
       div.className = "attachThumb attachQueued show";
       const isPdf = (file.type || "").includes("pdf");
@@ -2010,6 +2061,15 @@
         img.src = URL.createObjectURL(file);
         div.appendChild(img);
       }
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "attachRemove";
+      removeBtn.innerHTML = `<span class="icon">close</span>`;
+      removeBtn.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        removePendingExpenseFile(index);
+      });
+      div.appendChild(removeBtn);
       return div;
     }
     function renderAttachmentGrid(grid, items, expenseId, {showEmpty=false} = {}){
@@ -2023,7 +2083,7 @@
         }
         return;
       }
-      items.forEach((att)=> grid.appendChild(buildAttachmentThumb(att, expenseId)));
+      items.forEach((att)=> grid.appendChild(buildAttachmentThumb(att, expenseId, grid)));
     }
     function createUploadSkeleton(){
       const wrap = document.createElement("div");
@@ -2103,7 +2163,7 @@
           });
           const attachment = result.attachment;
           if (attachment){
-            const thumb = buildAttachmentThumb(attachment, expenseId);
+            const thumb = buildAttachmentThumb(attachment, expenseId, grid);
             grid.replaceChild(thumb, wrap);
           }
         }catch(e){
@@ -2156,7 +2216,11 @@
       const grid = $("#expAttachGrid");
       grid.innerHTML = "";
       if (!State.pendingExpenseFiles.length) return;
-      State.pendingExpenseFiles.forEach((file)=> grid.appendChild(buildQueuedThumb(file)));
+      State.pendingExpenseFiles.forEach((file, index)=> grid.appendChild(buildQueuedThumb(file, index)));
+    }
+    function removePendingExpenseFile(index){
+      State.pendingExpenseFiles.splice(index, 1);
+      renderPendingExpenseAttachments();
     }
     function addPendingExpenseFiles(fileList){
       const queue = Array.from(fileList || []);
@@ -2375,6 +2439,7 @@
       await API.post(`/api/months/${State.monthId}/drafts/expenses`, payload);
       setToast("Черновик сохранён");
       await loadDrafts();
+      resetExpenseForm();
     }
 
     /**********************
@@ -3377,6 +3442,16 @@
 
       if (cond1 || cond2 || cond3) warn.classList.remove("hidden");
     }
+    function resetExpenseForm(){
+      $("#expTitle").value = "";
+      $("#expUnit").value = "";
+      $("#expQty").value = "1";
+      $("#expComment").value = "";
+      State.pendingExpenseFiles = [];
+      $("#expAttachGrid").innerHTML = "";
+      $("#expAttachInput").value = "";
+      recalcExpenseTotals();
+    }
 
     function applyTemplate(idxStr){
       if (!idxStr) return;
@@ -3865,13 +3940,7 @@
       await refreshAll();
 
       if (andMore){
-        $("#expTitle").value = "";
-        $("#expUnit").value = "";
-        $("#expQty").value = "1";
-        $("#expComment").value = "";
-        State.pendingExpenseFiles = [];
-        $("#expAttachGrid").innerHTML = "";
-        recalcExpenseTotals();
+        resetExpenseForm();
       }
     }
 
@@ -4109,18 +4178,10 @@
       $("#viewerModal").addEventListener("click", (e)=>{ if (e.target === $("#viewerModal")) closeViewerModal(); });
       $("#viewerDeleteBtn").addEventListener("click", async ()=>{
         if (!Viewer.attachment || !Viewer.expenseId) return;
-        const ok = confirm("Удалить файл?");
-        if (!ok) return;
         try{
-          await API.del(`/api/attachments/${Viewer.attachment.id}`);
-          revokeAttachmentBlob(Viewer.attachment.id);
-          const expenseId = Viewer.expenseId;
-          closeViewerModal();
-          const items = await fetchExpenseAttachments(expenseId);
           const grid = $("#editBody .attachmentGrid");
-          if (grid) renderAttachmentGrid(grid, items, expenseId, {showEmpty:true});
-          await refreshAll();
-          setToast("Удалено");
+          const deleted = await deleteAttachment(Viewer.attachment, Viewer.expenseId, grid);
+          if (deleted) closeViewerModal();
         }catch(e){ alert(String(e.message||e)); }
       });
 
