@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -228,6 +229,35 @@ def init_db() -> None:
         );
         """
     )
+    # categories
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS category_aliases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id INTEGER NOT NULL,
+            alias TEXT NOT NULL,
+            alias_norm TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(alias_norm),
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+        );
+        """
+    )
+    db_exec(
+        "CREATE INDEX IF NOT EXISTS idx_category_aliases_category_id ON category_aliases(category_id);"
+    )
     # drafts
     db_exec(
         """
@@ -335,6 +365,8 @@ def init_db() -> None:
         db_exec("ALTER TABLE services ADD COLUMN income_type TEXT NOT NULL DEFAULT 'donation';")
     db_exec("UPDATE services SET income_type='donation' WHERE income_type IS NULL OR income_type='';")
 
+    ensure_categories_from_expenses()
+
 
 def iso_now(tz: ZoneInfo) -> str:
     return dt.datetime.now(tz=tz).replace(microsecond=0).isoformat()
@@ -346,6 +378,93 @@ def iso_date(d: dt.date) -> str:
 
 def parse_iso_date(s: str) -> dt.date:
     return dt.date.fromisoformat(s)
+
+
+def normalize_alias(alias: str) -> str:
+    s = str(alias or "").strip().lower()
+    s = s.replace("ё", "е")
+    s = re.sub(r"[.,;:/\\\\]", "", s)
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
+def ensure_categories_from_expenses() -> None:
+    if not db_fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='categories';"):
+        return
+    now = iso_now(CFG.tzinfo())
+    rows = db_fetchall("SELECT DISTINCT category FROM expenses;")
+    for r in rows:
+        name = str(r["category"] or "").strip()
+        if not name:
+            continue
+        existing = db_fetchone("SELECT id FROM categories WHERE name=?;", (name,))
+        if not existing:
+            db_exec(
+                """
+                INSERT INTO categories (name, is_active, sort_order, created_at, updated_at)
+                VALUES (?, 1, 0, ?, ?);
+                """,
+                (name, now, now),
+            )
+
+
+def resolve_category(name: str, role: str, user_id: Optional[int] = None) -> str:
+    raw = str(name or "").strip() or "Прочее"
+    alias_norm = normalize_alias(raw)
+    if alias_norm:
+        row = db_fetchone(
+            """
+            SELECT c.name
+            FROM category_aliases a
+            JOIN categories c ON c.id=a.category_id
+            WHERE a.alias_norm=?;
+            """,
+            (alias_norm,),
+        )
+        if row:
+            return str(row["name"])
+
+    existing = db_fetchone("SELECT * FROM categories WHERE name=?;", (raw,))
+    if existing:
+        return str(existing["name"])
+
+    if role in ("admin", "accountant"):
+        now = iso_now(CFG.tzinfo())
+        new_id = db_exec_returning_id(
+            """
+            INSERT INTO categories (name, is_active, sort_order, created_at, updated_at)
+            VALUES (?, 1, 0, ?, ?);
+            """,
+            (raw, now, now),
+        )
+        after = db_fetchone("SELECT * FROM categories WHERE id=?;", (new_id,))
+        log_audit(user_id, "CREATE", "category", int(new_id), None, dict(after) if after else None)
+        return raw
+
+    return raw
+
+
+def get_categories_payload() -> List[Dict[str, Any]]:
+    categories = db_fetchall(
+        "SELECT * FROM categories ORDER BY sort_order ASC, name COLLATE NOCASE;"
+    )
+    aliases = db_fetchall(
+        "SELECT * FROM category_aliases ORDER BY created_at ASC, id ASC;"
+    )
+    counts = db_fetchall("SELECT category, COUNT(*) AS cnt FROM expenses GROUP BY category;")
+    count_map = {str(r["category"]): int(r["cnt"]) for r in counts}
+
+    alias_map: Dict[int, List[Dict[str, Any]]] = {}
+    for a in aliases:
+        alias_map.setdefault(int(a["category_id"]), []).append(dict(a))
+
+    items = []
+    for c in categories:
+        item = dict(c)
+        item["aliases"] = alias_map.get(int(c["id"]), [])
+        item["expense_count"] = count_map.get(str(c["name"]), 0)
+        items.append(item)
+    return items
 
 
 def is_month_closed(month_id: int) -> bool:
@@ -830,6 +949,7 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
     )
     tz = CFG.tzinfo()
     now = iso_now(tz)
+    category = resolve_category("Десятина", "admin", user_id)
 
     if existing:
         before = dict(existing)
@@ -839,7 +959,7 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
             SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, updated_at=?
             WHERE id=?;
             """,
-            (iso_date(tithe_date), "Десятина", tithe_amount, tithe_amount, now, existing["id"]),
+            (iso_date(tithe_date), category, tithe_amount, tithe_amount, now, existing["id"]),
         )
         after = dict(db_fetchone("SELECT * FROM expenses WHERE id=?;", (existing["id"],)))
         log_audit(user_id, "UPSERT_SYSTEM_TITHE", "expense", int(existing["id"]), before, after)
@@ -851,7 +971,7 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
                 is_system, created_at, updated_at
             ) VALUES (?, ?, ?, ?, 1, ?, ?, NULL, 1, ?, ?);
             """,
-            (month_id, iso_date(tithe_date), "Десятина", "10% Объединение", tithe_amount, tithe_amount, now, now),
+            (month_id, iso_date(tithe_date), category, "10% Объединение", tithe_amount, tithe_amount, now, now),
         )
         after = dict(db_fetchone("SELECT * FROM expenses WHERE id=?;", (new_id,)))
         log_audit(user_id, "CREATE_SYSTEM_TITHE", "expense", int(new_id), None, after)
@@ -1182,6 +1302,33 @@ class SettingsUpdateIn(BaseModel):
     timezone: Optional[str] = None
     ui_theme: Optional[str] = None
     daily_expenses_enabled: Optional[bool] = None
+
+
+class CategoryCreateIn(BaseModel):
+    name: str
+
+
+class CategoryUpdateIn(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class CategoryAliasCreateIn(BaseModel):
+    alias: str
+
+
+class CategoryMergeIn(BaseModel):
+    target_id: int
+    source_ids: List[int]
+
+
+class CategoryRenameMassIn(BaseModel):
+    from_: str = Field(..., alias="from")
+    to: str
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 # ---------------------------
@@ -1636,6 +1783,7 @@ async def on_confirm(cq: CallbackQuery):
         e_date = parse_iso_date(pending["expense_date"])
         m = get_or_create_month(e_date.year, e_date.month)
         month_id = int(m["id"])
+        category = resolve_category(pending["category"], role, user_id)
 
         new_id = db_exec_returning_id(
             """
@@ -1647,7 +1795,7 @@ async def on_confirm(cq: CallbackQuery):
             (
                 month_id,
                 pending["expense_date"],
-                pending["category"],
+                category,
                 pending["title"],
                 float(pending.get("qty", 1.0)),
                 float(pending["unit_amount"]),
@@ -2273,6 +2421,202 @@ def delete_service(
 
 
 # ---------------------------
+# Categories + aliases
+# ---------------------------
+
+@APP.get("/api/categories")
+def list_categories(
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    return {"items": get_categories_payload()}
+
+
+@APP.post("/api/categories")
+def create_category(
+        body: CategoryCreateIn,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    name = str(body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    existing = db_fetchone("SELECT * FROM categories WHERE name=?;", (name,))
+    if existing:
+        raise HTTPException(status_code=409, detail="Category already exists")
+    now = iso_now(CFG.tzinfo())
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO categories (name, is_active, sort_order, created_at, updated_at)
+        VALUES (?, 1, 0, ?, ?);
+        """,
+        (name, now, now),
+    )
+    after = db_fetchone("SELECT * FROM categories WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "category", new_id, None, dict(after) if after else None)
+    return {"id": new_id}
+
+
+@APP.put("/api/categories/{category_id}")
+def update_category(
+        category_id: int,
+        body: CategoryUpdateIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    before = db_fetchone("SELECT * FROM categories WHERE id=?;", (category_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    updates = []
+    params: List[Any] = []
+    if body.name is not None:
+        name = str(body.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        existing = db_fetchone("SELECT id FROM categories WHERE name=?;", (name,))
+        if existing and int(existing["id"]) != int(category_id):
+            raise HTTPException(status_code=409, detail="Category name already exists")
+        updates.append("name=?")
+        params.append(name)
+    if body.is_active is not None:
+        updates.append("is_active=?")
+        params.append(1 if body.is_active else 0)
+    if body.sort_order is not None:
+        updates.append("sort_order=?")
+        params.append(int(body.sort_order))
+    if not updates:
+        return {"ok": True}
+    updates.append("updated_at=?")
+    params.append(iso_now(CFG.tzinfo()))
+    params.append(category_id)
+    db_exec(
+        f"UPDATE categories SET {', '.join(updates)} WHERE id=?;",
+        tuple(params),
+    )
+    after = db_fetchone("SELECT * FROM categories WHERE id=?;", (category_id,))
+    log_audit(int(u["id"]), "UPDATE", "category", category_id, dict(before), dict(after) if after else None)
+    return {"ok": True}
+
+
+@APP.post("/api/categories/{category_id}/aliases")
+def create_category_alias(
+        category_id: int,
+        body: CategoryAliasCreateIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    category = db_fetchone("SELECT * FROM categories WHERE id=?;", (category_id,))
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    alias = str(body.alias or "").strip()
+    if not alias:
+        raise HTTPException(status_code=400, detail="Alias is required")
+    alias_norm = normalize_alias(alias)
+    if not alias_norm:
+        raise HTTPException(status_code=400, detail="Alias is invalid")
+    existing = db_fetchone("SELECT id FROM category_aliases WHERE alias_norm=?;", (alias_norm,))
+    if existing:
+        raise HTTPException(status_code=409, detail="Alias already exists")
+    now = iso_now(CFG.tzinfo())
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO category_aliases (category_id, alias, alias_norm, created_at)
+        VALUES (?, ?, ?, ?);
+        """,
+        (category_id, alias, alias_norm, now),
+    )
+    after = db_fetchone("SELECT * FROM category_aliases WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "category_alias", new_id, None, dict(after) if after else None)
+    return {"id": new_id}
+
+
+@APP.delete("/api/category-aliases/{alias_id}")
+def delete_category_alias(
+        alias_id: int,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    before = db_fetchone("SELECT * FROM category_aliases WHERE id=?;", (alias_id,))
+    if not before:
+        raise HTTPException(status_code=404, detail="Alias not found")
+    db_exec("DELETE FROM category_aliases WHERE id=?;", (alias_id,))
+    log_audit(int(u["id"]), "DELETE", "category_alias", alias_id, dict(before), None)
+    return {"ok": True}
+
+
+@APP.post("/api/categories/merge")
+def merge_categories(
+        body: CategoryMergeIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    target = db_fetchone("SELECT * FROM categories WHERE id=?;", (body.target_id,))
+    if not target:
+        raise HTTPException(status_code=404, detail="Target category not found")
+    source_ids = [int(x) for x in body.source_ids if int(x) != int(body.target_id)]
+    if not source_ids:
+        raise HTTPException(status_code=400, detail="Source categories are required")
+
+    sources = []
+    for source_id in source_ids:
+        row = db_fetchone("SELECT * FROM categories WHERE id=?;", (source_id,))
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Source category {source_id} not found")
+        sources.append(row)
+
+    now = iso_now(CFG.tzinfo())
+    before = {
+        "target": dict(target),
+        "sources": [dict(s) for s in sources],
+    }
+    with db_connect() as conn:
+        for source in sources:
+            conn.execute(
+                "UPDATE expenses SET category=? WHERE category=?;",
+                (target["name"], source["name"]),
+            )
+            conn.execute(
+                "UPDATE category_aliases SET category_id=? WHERE category_id=?;",
+                (int(target["id"]), int(source["id"])),
+            )
+            conn.execute(
+                "UPDATE categories SET is_active=0, updated_at=? WHERE id=?;",
+                (now, int(source["id"])),
+            )
+        conn.commit()
+    after = {
+        "target": dict(db_fetchone("SELECT * FROM categories WHERE id=?;", (target["id"],)) or {}),
+        "sources": [dict(db_fetchone("SELECT * FROM categories WHERE id=?;", (int(s["id"]),)) or {}) for s in sources],
+    }
+    log_audit(int(u["id"]), "MERGE", "category", int(target["id"]), before, after)
+    return {"ok": True}
+
+
+@APP.post("/api/categories/rename-mass")
+def rename_categories_mass(
+        body: CategoryRenameMassIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    from_name = str(body.from_ or "").strip()
+    to_name = str(body.to or "").strip()
+    if not from_name or not to_name:
+        raise HTTPException(status_code=400, detail="Invalid rename payload")
+    before_count = db_fetchone(
+        "SELECT COUNT(*) AS cnt FROM expenses WHERE category=?;",
+        (from_name,),
+    )
+    db_exec("UPDATE expenses SET category=? WHERE category=?;", (to_name, from_name))
+    after_count = db_fetchone(
+        "SELECT COUNT(*) AS cnt FROM expenses WHERE category=?;",
+        (to_name,),
+    )
+    log_audit(
+        int(u["id"]),
+        "RENAME_MASS",
+        "category",
+        None,
+        {"from": from_name, "count": int(before_count["cnt"] if before_count else 0)},
+        {"to": to_name, "count": int(after_count["cnt"] if after_count else 0)},
+    )
+    return {"ok": True}
+
+
+# ---------------------------
 # Expenses
 # ---------------------------
 
@@ -2309,6 +2653,7 @@ def create_expense(
     tz = CFG.tzinfo()
     now = iso_now(tz)
 
+    category = resolve_category(body.category, str(u["role"]), int(u["id"]))
     total = round(float(body.qty) * float(body.unit_amount), 2)
     new_id = db_exec_returning_id(
         """
@@ -2320,7 +2665,7 @@ def create_expense(
         (
             month_id,
             body.expense_date.isoformat(),
-            body.category,
+            category,
             body.title,
             float(body.qty),
             float(body.unit_amount),
@@ -2354,6 +2699,7 @@ def update_expense(
     tz = CFG.tzinfo()
     now = iso_now(tz)
 
+    category = resolve_category(body.category, str(u["role"]), int(u["id"]))
     total = round(float(body.qty) * float(body.unit_amount), 2)
     db_exec(
         """
@@ -2363,7 +2709,7 @@ def update_expense(
         """,
         (
             body.expense_date.isoformat(),
-            body.category,
+            category,
             body.title,
             float(body.qty),
             float(body.unit_amount),
@@ -2412,6 +2758,7 @@ def create_expense_draft(
     tz = CFG.tzinfo()
     now = iso_now(tz)
     payload = normalize_expense_draft_payload(body, tz)
+    payload["category"] = resolve_category(payload.get("category"), str(u["role"]), int(u["id"]))
     new_id = db_exec_returning_id(
         """
         INSERT INTO drafts (
@@ -2446,6 +2793,7 @@ def update_draft(
     tz = CFG.tzinfo()
     now = iso_now(tz)
     payload = normalize_expense_draft_payload(body, tz)
+    payload["category"] = resolve_category(payload.get("category"), str(u["role"]), int(u["id"]))
     db_exec(
         "UPDATE drafts SET payload_json=?, updated_at=? WHERE id=?;",
         (json.dumps(payload, ensure_ascii=False), now, draft_id),
@@ -2509,6 +2857,7 @@ def submit_draft(
     tz = CFG.tzinfo()
     now = iso_now(tz)
     payload = normalize_expense_draft_payload(json.loads(draft["payload_json"]), tz)
+    payload["category"] = resolve_category(payload.get("category"), str(u["role"]), int(u["id"]))
     total = round(float(payload["qty"]) * float(payload["unit_amount"]), 2)
 
     new_id = db_exec_returning_id(
@@ -2957,7 +3306,6 @@ def export_excel(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
-
 # ---------------------------
 # Run (local)
 # ---------------------------
@@ -2972,4 +3320,3 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
-
