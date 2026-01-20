@@ -2439,6 +2439,14 @@ def list_months(
     rows = db_fetchall("SELECT * FROM months WHERE year=? ORDER BY month ASC;", (year,))
     return {"items": [dict(r) for r in rows]}
 
+@APP.get("/api/months/latest")
+def latest_month(
+    u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    row = db_fetchone("SELECT * FROM months ORDER BY year DESC, month DESC LIMIT 1;")
+    return {"item": dict(row) if row else None}
+
+
 
 @APP.post("/api/months")
 def create_month(
