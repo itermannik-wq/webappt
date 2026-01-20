@@ -1,0 +1,4716 @@
+<!-- webapp.html
+  Telegram WebApp UI (один файл, без сборки)
+  Требования: mobile-first, тёмная тема из Telegram theme params, bottom bar, анимации, Chart.js.
+-->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <title>БУХ • Бухгалтерия</title>
+
+  <!-- Telegram WebApp -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Material Symbols -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:wght@300;400;500;600&display=swap" />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg: #0b0f14;
+      --card: rgba(255,255,255,.06);
+      --card2: rgba(255,255,255,.08);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.65);
+      --muted2: rgba(255,255,255,.45);
+      --stroke: rgba(255,255,255,.10);
+      --shadow: 0 10px 30px rgba(0,0,0,.30);
+      --ring-track: rgba(255,255,255,.08);
+
+      --accent: #10b981;        /* emerald */
+      --accent2: #34d399;
+      --danger: #ef4444;
+      --warn: #f59e0b;
+
+      --r-card: 18px;
+      --r-btn: 16px;
+      --gap: 16px;
+      --gap8: 8px;
+      --nav-h: 64px;
+
+      --safe-top: env(safe-area-inset-top);
+      --safe-bot: env(safe-area-inset-bottom);
+
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif;
+    }
+
+    /* Light theme fallback */
+    [data-theme="light"]{
+      --bg: #f4f6fa;
+      --card: #ffffff;
+      --card2: #eef2f7;
+      --text: #111827;
+      --muted: #4b5563;
+      --muted2: #6b7280;
+      --stroke: rgba(15,23,42,.12);
+      --shadow: 0 10px 24px rgba(15,23,42,.10);
+      --ring-track: rgba(15,23,42,.08);
+    }
+
+    *{ box-sizing: border-box; }
+    html, body{
+      height: 100%;
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      overscroll-behavior: none;
+    }
+
+    a{ color: inherit; text-decoration: none; }
+    button, input, select, textarea{
+      font-family: var(--font);
+      color: var(--text);
+    }
+
+    .app{
+      min-height: 100%;
+      padding: calc(var(--safe-top) + 12px) 14px calc(var(--nav-h) + var(--safe-bot) + 18px);
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .monthTitle{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .monthTitle .title{
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: .2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      box-shadow: none;
+    }
+    .icon{
+      font-family: "Material Symbols Rounded";
+      font-weight: 500;
+      font-style: normal;
+      font-size: 22px;
+      line-height: 1;
+      letter-spacing: normal;
+      text-transform: none;
+      display: inline-block;
+      white-space: nowrap;
+      word-wrap: normal;
+      direction: ltr;
+      -webkit-font-feature-settings: 'liga';
+      -webkit-font-smoothing: antialiased;
+    }
+    .btnIcon{
+      width: 42px; height: 42px;
+      display:grid; place-items:center;
+      border-radius: 14px;
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      box-shadow: none;
+      padding: 0;
+      cursor: pointer;
+      transition: transform .12s ease, background .12s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btnIcon:active{ transform: scale(.98); }
+
+    .section{
+      margin-top: 14px;
+    }
+    .sectionHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin-bottom: 10px;
+    }
+    .sectionHeader h3{
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+      color: var(--muted);
+      letter-spacing: .3px;
+    }
+
+    .grid2{
+      display:grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+    }
+    .attachmentGrid{
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .attachThumb,
+    .attachSkeleton{
+      position: relative;
+      border-radius: 14px;
+      overflow: hidden;
+      aspect-ratio: 1 / 1;
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--stroke);
+    }
+    .attachThumb{
+      opacity: 0;
+      transform: scale(.96);
+      transition: opacity .18s ease, transform .18s ease;
+      cursor: pointer;
+    }
+    .attachThumb.show{
+      opacity: 1;
+      transform: scale(1);
+    }
+    .attachThumb img{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .attachRemove{
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.35);
+      background: rgba(15,23,42,.7);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      padding: 0;
+    }
+    .attachRemove .icon{
+      font-size: 16px;
+    }
+    .attachBadge{
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      padding: 4px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      background: rgba(17,24,39,.7);
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+    .attachIcon{
+      position: absolute;
+      right: 6px;
+      bottom: 6px;
+      color: rgba(255,255,255,.85);
+      font-size: 18px;
+    }
+    .attachProgress{
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      height: 3px;
+      width: 0%;
+      background: var(--accent);
+      transition: width .1s linear;
+    }
+    .attachHint{
+      margin-top: 8px;
+    }
+    .attachQueued{
+      opacity: .75;
+    }
+    .amtRow{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap: 6px;
+    }
+    .attachCount{
+      display:inline-flex;
+      align-items:center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .attachCount .icon{
+      font-size: 16px;
+    }
+    .viewerModal .modal{
+      max-width: 720px;
+      width: calc(100% - 32px);
+    }
+    .viewerContent{
+      position: relative;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background: rgba(0,0,0,.2);
+      border-radius: 16px;
+      padding: 10px;
+      max-height: 70vh;
+      overflow: auto;
+    }
+    .viewerContent img,
+    .viewerContent iframe{
+      max-width: 100%;
+      max-height: 68vh;
+      object-fit: contain;
+      border-radius: 12px;
+      border: 0;
+    }
+    .card{
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: var(--r-card);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .collectionCard{
+      padding: 0;
+    }
+    .collectionToggle{
+      width: 100%;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .collectionToggle:active{ transform: scale(.99); }
+    .collectionMeta{
+      display:flex;
+      flex-direction:column;
+      gap: 4px;
+      min-width: 0;
+    }
+    .collectionBody{
+      padding: 0 12px;
+      border-top: 1px solid var(--stroke);
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(-6px);
+      overflow: hidden;
+      transition: max-height .28s ease, opacity .2s ease, transform .2s ease, padding .2s ease;
+    }
+    .collectionCard.expanded .collectionBody{
+      padding: 0 12px 12px;
+      max-height: 2200px;
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .collectionChevron{
+      color: var(--muted);
+      transition: transform .18s ease;
+    }
+    .collectionCard.expanded .collectionChevron{
+      transform: rotate(180deg);
+    }
+    .categoryCard .collectionToggle{
+      gap: 10px;
+      flex-wrap: wrap;
+      width: auto;
+      flex: 1;
+    }
+    .categoryHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    .categoryMeta{
+      display:flex;
+      flex-direction:column;
+      gap: 4px;
+      min-width: 0;
+    }
+    .categoryActions{
+      display:flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items:center;
+      justify-content:flex-end;
+    }
+    .categoryCount{
+      font-size: 12px;
+      color: var(--muted2);
+    }
+    .aliasList{
+      display:flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .aliasChip{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--card2);
+      border: 1px solid var(--stroke);
+      font-size: 12px;
+      animation: chipPop .14s ease;
+    }
+    .aliasChip button{
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      display:grid;
+      place-items:center;
+    }
+    .aliasChip .icon{
+      font-size: 16px;
+    }
+    @keyframes chipPop{
+      from{ transform: scale(.92); opacity: .5; }
+      to{ transform: scale(1); opacity: 1; }
+    }
+    .chip.selected{
+      color: rgba(16,185,129,.95);
+      border-color: rgba(16,185,129,.35);
+      background: rgba(16,185,129,.12);
+    }
+    .metric{
+      padding: 12px 12px 10px;
+      min-height: 82px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      opacity: 0;
+      transform: translateY(10px);
+      animation: staggerIn .32s ease forwards;
+    }
+    .metric:nth-child(1){ animation-delay: .02s; }
+    .metric:nth-child(2){ animation-delay: .08s; }
+    .metric:nth-child(3){ animation-delay: .14s; }
+    .metric:nth-child(4){ animation-delay: .20s; }
+
+    @keyframes staggerIn{
+      to{ opacity: 1; transform: translateY(0); }
+    }
+    .metric .label{
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .metric .value{
+      font-size: 18px;
+      font-weight: 750;
+      letter-spacing: .2px;
+      margin-top: 6px;
+    }
+    .metric .sub{
+      font-size: 12px;
+      color: var(--muted2);
+      margin-top: 6px;
+    }
+
+    .bigCard{
+      padding: 14px;
+    }
+    .miniCard{
+      padding: 12px 14px;
+    }
+    .draftsCardBtn{
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: inherit;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      padding: 0;
+      cursor: pointer;
+    }
+    .draftCount{
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(16,185,129,.14);
+      border: 1px solid rgba(16,185,129,.28);
+      font-size: 12px;
+    }
+    .row{
+      display:flex;
+      align-items:center;
+      gap: 12px;
+    }
+    .rowBetween{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 10px;
+    }
+    .muted{ color: var(--muted); }
+    .muted2{ color: var(--muted2); }
+    .tiny{ font-size: 12px; }
+    .small{ font-size: 13px; }
+    .bold{ font-weight: 700; }
+    .mono{ font-variant-numeric: tabular-nums; }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--stroke);
+      background: var(--card2);
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    #expWarn{
+      white-space: normal;
+      max-width: 100%;
+      line-height: 1.35;
+      align-items: flex-start;
+    }
+    .badge.ok{ color: rgba(16,185,129,.95); border-color: rgba(16,185,129,.35); }
+    .badge.warn{ color: rgba(245,158,11,.95); border-color: rgba(245,158,11,.35); }
+    .badge.bad{ color: rgba(239,68,68,.95); border-color: rgba(239,68,68,.35); }
+
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: var(--r-btn);
+      border: 1px solid var(--stroke);
+      background: var(--card);
+      cursor: pointer;
+      transition: transform .12s ease, background .12s ease;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .btn:active{ transform: scale(.98); }
+    .btn.primary{
+      background: linear-gradient(180deg, rgba(16,185,129,.95), rgba(16,185,129,.75));
+      border-color: rgba(16,185,129,.35);
+      color: #062216;
+      font-weight: 750;
+    }
+    .btn.danger{
+      background: linear-gradient(180deg, rgba(239,68,68,.95), rgba(239,68,68,.75));
+      border-color: rgba(239,68,68,.35);
+      color: #fff;
+      font-weight: 750;
+    }
+    .btn.ghost{
+      background: transparent;
+    }
+    .btn.small{
+      padding: 10px 12px;
+      border-radius: 14px;
+      font-size: 13px;
+    }
+
+    .divider{
+      height: 1px;
+      background: var(--stroke);
+      margin: 12px 0;
+    }
+
+    .chartWrap{
+      height: 210px;
+      padding-top: 6px;
+    }
+    .chartWrap.small{
+      height: 190px;
+    }
+    canvas{
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    /* Progress ring (MНСП) */
+    .ring{
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      background: conic-gradient(var(--accent) 0deg, var(--ring-track) 0deg);
+      display:grid;
+      place-items:center;
+      border: 1px solid var(--stroke);
+      box-shadow: var(--shadow);
+      flex: 0 0 auto;
+    }
+    .ringInner{
+      width: 74px;
+      height: 74px;
+      border-radius: 50%;
+      background: var(--bg);
+      display:grid;
+      place-items:center;
+      border: 1px solid var(--stroke);
+    }
+    .ringInner .pct{
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .ringInner .cap{
+      font-size: 10px;
+      color: var(--muted2);
+      margin-top: -2px;
+    }
+
+    /* Lists */
+    .list{
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+    }
+    .item{
+      padding: 12px;
+      border-radius: var(--r-card);
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      box-shadow: var(--shadow);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      cursor: pointer;
+      transition: transform .12s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .item:active{ transform: scale(.99); }
+    .itemLeft{
+      display:flex;
+      align-items:flex-start;
+      gap: 10px;
+      min-width: 0;
+    }
+    .itemIco{
+      width: 40px;
+      height: 40px;
+      border-radius: 14px;
+      background: rgba(16,185,129,.12);
+      border: 1px solid rgba(16,185,129,.20);
+      display:grid;
+      place-items:center;
+      flex: 0 0 auto;
+    }
+    .itemIco .icon{ color: var(--accent2); font-size: 22px; }
+    .itemText{
+      min-width: 0;
+    }
+    .itemText .t{
+      font-weight: 700;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .itemText .s{
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .itemRight{
+      text-align:right;
+      flex: 0 0 auto;
+    }
+    .itemRight .amt{
+      font-weight: 800;
+      font-size: 14px;
+    }
+    .itemRight .dt{
+      font-size: 12px;
+      color: var(--muted2);
+      margin-top: 3px;
+    }
+
+    /* Bottom nav */
+    .nav{
+      position: fixed;
+      left: 0; right: 0;
+      bottom: 0;
+      padding: 10px 14px calc(10px + var(--safe-bot));
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: blur(18px);
+      border-top: 1px solid var(--stroke);
+      z-index: 50;
+    }
+    .navInner{
+      max-width: 520px;
+      margin: 0 auto;
+      display:grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      height: calc(var(--nav-h) - 20px);
+    }
+    .navInner.centered{
+      display:flex;
+      justify-content:center;
+      gap: 12px;
+    }
+    .navInner.centered .navBtn{
+      flex: 0 0 auto;
+      min-width: 92px;
+    }
+    .navBtn{
+      border: 1px solid transparent;
+      background: transparent;
+      border-radius: 16px;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap: 2px;
+      cursor: pointer;
+      transition: transform .12s ease, background .12s ease, border-color .12s ease;
+      -webkit-tap-highlight-color: transparent;
+      padding: 6px 0;
+    }
+    .navBtn:active{ transform: scale(.98); }
+    .navBtn .icon{ font-size: 24px; color: var(--muted); }
+    .navBtn .lbl{ font-size: 11px; color: var(--muted); }
+    .navBtn.active{
+      background: rgba(16,185,129,.12);
+      border-color: rgba(16,185,129,.25);
+    }
+    .navBtn.active .icon,
+    .navBtn.active .lbl{
+      color: rgba(16,185,129,.95);
+      font-weight: 650;
+    }
+
+    /* Screens + transitions */
+    .screen{
+      display:none;
+      opacity: 0;
+      transform: translateX(14px);
+    }
+    .screen.active{
+      display:block;
+      animation: screenIn .20s ease forwards;
+    }
+    @keyframes screenIn{
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Forms */
+    .form{
+      display:flex;
+      flex-direction:column;
+      gap: 12px;
+    }
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap: 6px;
+      min-width: 0;
+    }
+    .field label{
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: .2px;
+    }
+    .input{
+      border-radius: 16px;
+      border: 1px solid var(--stroke);
+      background: var(--card);
+      padding: 12px 12px;
+      font-size: 15px;
+      outline: none;
+      width: 100%;
+      min-width: 0;
+    }
+    .input:focus{
+      border-color: rgba(16,185,129,.35);
+      box-shadow: 0 0 0 3px rgba(16,185,129,.12);
+    }
+    .input[readonly]{ color: var(--muted); }
+    .input.hiddenSelect{
+      display: none;
+    }
+
+    .dropdown{
+      position: relative;
+    }
+    .dropdownTrigger{
+      width: 100%;
+      border-radius: 16px;
+      border: 1px solid var(--stroke);
+      background: var(--card);
+      padding: 12px 12px;
+      font-size: 15px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .dropdownTrigger:focus-visible{
+      outline: none;
+      border-color: rgba(16,185,129,.35);
+      box-shadow: 0 0 0 3px rgba(16,185,129,.12);
+    }
+    .dropdownTrigger .icon{
+      font-size: 20px;
+      color: var(--muted);
+      transition: transform .2s ease;
+    }
+    .dropdown.open .dropdownTrigger .icon{
+      transform: rotate(180deg);
+    }
+    .dropdownPanel{
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 6px;
+      display:flex;
+      flex-direction:column;
+      gap: 4px;
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(-6px) scale(.98);
+      overflow: hidden;
+      pointer-events: none;
+      transition: max-height .24s ease, opacity .18s ease, transform .18s ease;
+      z-index: 20;
+    }
+    .dropdown.open .dropdownPanel{
+      max-height: 260px;
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    .dropdownOption{
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 12px;
+      text-align: left;
+      cursor: pointer;
+      transition: background .16s ease, border-color .16s ease, transform .16s ease;
+    }
+    .dropdownOption:hover{
+      background: var(--card2);
+    }
+    .dropdownOption:active{
+      transform: scale(.99);
+    }
+    .dropdownOption[aria-selected="true"]{
+      background: rgba(16,185,129,.12);
+      border-color: rgba(16,185,129,.25);
+      color: rgba(16,185,129,.95);
+      font-weight: 600;
+    }
+    @media (prefers-reduced-motion: reduce){
+      .dropdownPanel,
+      .dropdownTrigger,
+      .dropdownOption{
+        transition: none;
+      }
+    }
+
+    .tabs{
+      display:flex;
+      gap: 10px;
+      padding: 6px;
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      margin-bottom: 12px;
+    }
+    .tab{
+      flex:1;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .12s ease, transform .12s ease;
+    }
+    .tab:active{ transform: scale(.98); }
+    .tab.active{
+      background: rgba(16,185,129,.12);
+      border-color: rgba(16,185,129,.25);
+      color: rgba(16,185,129,.95);
+    }
+
+    .chips{
+      display:flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .chip{
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: var(--card2);
+      border: 1px solid var(--stroke);
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      transition: transform .12s ease;
+      user-select:none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .chip:active{ transform: scale(.98); }
+    .chip.ok{
+      color: rgba(16,185,129,.95);
+      border-color: rgba(16,185,129,.35);
+      background: rgba(16,185,129,.12);
+    }
+    .chip.bad{
+      color: rgba(239,68,68,.95);
+      border-color: rgba(239,68,68,.35);
+      background: rgba(239,68,68,.12);
+    }
+
+    .stickyActions{
+      position: fixed;
+      left: 0; right: 0;
+      bottom: calc(var(--nav-h) + var(--safe-bot));
+      padding: 10px 14px;
+      z-index: 40;
+      pointer-events: none;
+    }
+    .stickyInner{
+      max-width: 520px;
+      margin: 0 auto;
+      display:flex;
+      flex-direction:column;
+      gap: 8px;
+      pointer-events: auto;
+    }
+    #addDonationWrap,
+    #addExpenseWrap{
+      padding-bottom: calc(var(--nav-h) + var(--safe-bot) + 220px);
+    }
+
+    /* Modal */
+    .modalBackdrop{
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      display:none;
+      align-items:flex-end;
+      justify-content:center;
+      z-index: 80;
+      padding: 12px 14px calc(14px + var(--safe-bot));
+    }
+    .modalBackdrop.show{ display:flex; animation: fadeIn .18s ease; }
+    @keyframes fadeIn{ from{opacity:0} to{opacity:1} }
+    .modal{
+      width: min(520px, 100%);
+      background: color-mix(in srgb, var(--bg) 70%, rgba(0,0,0,.15));
+      border: 1px solid var(--stroke);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      overflow:hidden;
+      transform: translateY(10px);
+      animation: sheetUp .20s ease forwards;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bot));
+    }
+    @keyframes sheetUp{ to{ transform: translateY(0); } }
+    .modalBackdrop.draftModal .modal{
+      animation: sheetUp220 .22s ease forwards;
+    }
+    @keyframes sheetUp220{ to{ transform: translateY(0); } }
+    .modalHeader{
+      padding: 12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      border-bottom: 1px solid var(--stroke);
+    }
+    .modalHeader .h{
+      font-weight: 800;
+      letter-spacing: .2px;
+    }
+    .modalBody{
+      padding: 14px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+    /* Success overlay */
+    .toast{
+      position: fixed;
+      left: 0; right: 0;
+      top: calc(var(--safe-top) + 12px);
+      display:flex;
+      justify-content:center;
+      z-index: 120;
+      pointer-events:none;
+    }
+    .toastCard{
+      pointer-events:none;
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 999px;
+      background: rgba(16,185,129,.14);
+      border: 1px solid rgba(16,185,129,.22);
+      backdrop-filter: blur(12px);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+    .toastCard.show{
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .check{
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      border: 2px solid rgba(16,185,129,.85);
+      position: relative;
+    }
+    .check:after{
+      content:"";
+      position:absolute;
+      width: 6px; height: 12px;
+      border-right: 2px solid rgba(16,185,129,.95);
+      border-bottom: 2px solid rgba(16,185,129,.95);
+      transform: rotate(45deg);
+      left: 7px; top: 2px;
+      opacity: 0;
+      animation: tick .36s ease forwards;
+    }
+    @keyframes tick{
+      to{ opacity: 1; }
+    }
+
+    /* Helpers */
+    .hidden{ display:none !important; }
+    .spacer8{ height: 8px; }
+    .spacer12{ height: 12px; }
+    .right{ text-align:right; }
+
+    .draftList{
+      display:flex;
+      flex-direction:column;
+      gap: 12px;
+    }
+    .draftItem{
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 16px;
+      padding: 12px;
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+      transition: height .18s ease, opacity .18s ease, margin .18s ease, padding .18s ease;
+      overflow: hidden;
+    }
+    .draftItem.removing{
+      opacity: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      margin-top: 0;
+      margin-bottom: 0;
+    }
+    .draftMain{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 10px;
+    }
+    .draftTitle{
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+    .draftMeta{
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .draftAmount{
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .draftActions{
+      display:flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    /* Small screens */
+    @media (max-width: 360px){
+      .grid2{ grid-template-columns: 1fr; }
+      .chartWrap{ height: 190px; }
+      .ring{ width: 90px; height: 90px; }
+      .ringInner{ width: 70px; height: 70px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="toast">
+    <div id="toastCard" class="toastCard">
+      <div class="check"></div>
+      <div class="small bold">Сохранено</div>
+    </div>
+  </div>
+
+  <div class="app">
+    <div class="topbar">
+      <div class="monthTitle">
+        <button id="monthBtn" class="pill" type="button" aria-label="Выбор месяца">
+          <span class="icon">calendar_month</span>
+          <span id="monthTitle" class="title">—</span>
+          <span class="icon" style="font-size:20px;color:var(--muted)">expand_more</span>
+        </button>
+      </div>
+      <div class="row" style="gap:10px;">
+        <button id="refreshBtn" class="btnIcon" type="button" aria-label="Обновить">
+          <span class="icon">refresh</span>
+        </button>
+        <span id="roleBadge" class="badge">роль: —</span>
+      </div>
+    </div>
+
+    <!-- SCREEN: DASHBOARD -->
+    <section id="screenDashboard" class="screen active">
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Ключевые показатели</h3>
+          <span id="monthMeta" class="tiny muted2"></span>
+        </div>
+
+        <div class="grid2">
+          <div class="card metric">
+            <div class="label">Доход за месяц</div>
+            <div id="mIncome" class="value mono">—</div>
+            <div class="sub">Σ воскресенья</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Расход за месяц</div>
+            <div id="mExpenses" class="value mono">—</div>
+            <div class="sub">Σ расходов</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Баланс на месяц</div>
+            <div id="mBalance" class="value mono">—</div>
+            <div class="sub">доход − расход</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Факт. баланс</div>
+            <div id="mFactBalance" class="value mono">—</div>
+            <div class="sub">остаток + баланс</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Выполнение МНСП</h3>
+          <span id="mnspsBadge" class="badge">—</span>
+        </div>
+
+        <div class="card bigCard">
+          <div class="rowBetween">
+            <div class="row" style="align-items:center;">
+              <div id="ring" class="ring">
+                <div class="ringInner">
+                  <div>
+                    <div id="mCompletion" class="pct mono">—</div>
+                    <div class="cap">МНСП</div>
+                  </div>
+                </div>
+              </div>
+              <div style="min-width:0;">
+                <div class="small muted">МНСП месяц</div>
+                <div id="mMinNeeded" class="bold mono" style="font-size:16px;margin-top:2px;">—</div>
+                <div class="spacer8"></div>
+                <div class="small muted">Собрано</div>
+                <div id="mCollected" class="bold mono" style="font-size:16px;margin-top:2px;">—</div>
+                <div class="spacer8"></div>
+                <div id="mNeedMore" class="tiny muted2">—</div>
+              </div>
+            </div>
+            <div class="right">
+              <div class="tiny muted2">СДДР</div>
+              <div id="mSDDR" class="bold mono" style="margin-top:4px;">—</div>
+              <div class="spacer8"></div>
+              <div class="tiny muted2">ПСДПМ</div>
+              <div id="mPSDPM" class="bold mono" style="margin-top:4px;">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Подборки</h3>
+          <span class="tiny muted2">Редкие отчёты</span>
+        </div>
+
+        <div id="yearCollection" class="card bigCard collectionCard">
+          <button id="yearCollectionToggle" class="collectionToggle" type="button" aria-expanded="false">
+            <div class="collectionMeta">
+              <div class="bold">Годовая аналитика</div>
+              <div id="yearMeta" class="tiny muted2">—</div>
+            </div>
+            <span class="icon collectionChevron">expand_more</span>
+          </button>
+          <div id="yearCollectionBody" class="collectionBody">
+            <div class="grid2">
+              <div class="card metric">
+                <div class="label">Доход года (YTD)</div>
+                <div id="yIncome" class="value mono">—</div>
+                <div class="sub">Σ пожертвования</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Расход года (YTD)</div>
+                <div id="yExpenses" class="value mono">—</div>
+                <div class="sub">Σ расходов</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Баланс года (YTD)</div>
+                <div id="yBalance" class="value mono">—</div>
+                <div class="sub">доход − расход</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Рост к прошлому году</div>
+                <div id="yYoY" class="value mono">—</div>
+                <div class="sub">по доходу</div>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Динамика доходов и расходов</div>
+                <div class="tiny muted2">по месяцам</div>
+              </div>
+              <div class="chartWrap">
+                <canvas id="yearLine"></canvas>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Баланс по месяцам</div>
+                <div class="tiny muted2">профицит/дефицит</div>
+              </div>
+              <div class="chartWrap">
+                <canvas id="yearBalanceBar"></canvas>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="grid2">
+                <div>
+                  <div class="small muted">Хорошие месяцы</div>
+                  <div id="goodMonths" class="chips"></div>
+                </div>
+                <div>
+                  <div class="small muted">Плохие месяцы</div>
+                  <div id="badMonths" class="chips"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Пожертвования по воскресеньям</h3>
+          <button id="addSundayBtn" class="btn small" type="button">
+            <span class="icon">add</span> Добавить
+          </button>
+        </div>
+        <div class="card bigCard">
+          <div class="chartWrap">
+            <canvas id="sundayBar"></canvas>
+          </div>
+          <div class="spacer8"></div>
+          <div id="sundayBadges" class="chips"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Расходы текущего месяца</h3>
+          <button id="allExpensesBtn" class="btn small" type="button">
+            <span class="icon">receipt_long</span> Все
+          </button>
+        </div>
+        <div class="card bigCard">
+          <div class="chartWrap small">
+            <canvas id="expensePie"></canvas>
+          </div>
+          <div class="divider"></div>
+          <div class="rowBetween">
+            <div class="small muted">Сумма расходов</div>
+            <div id="expenseSum" class="bold mono">—</div>
+          </div>
+          <div class="spacer12"></div>
+          <div id="lastExpensesList" class="list"></div>
+        </div>
+      </div>
+
+      <div id="dashEmptyState" class="section hidden">
+        <div class="card bigCard">
+          <div class="bold">Нет месяца в базе</div>
+          <div class="tiny muted" style="margin-top:6px;">
+            Админ может создать месяц в настройках или через кнопку ниже.
+          </div>
+          <div class="spacer12"></div>
+          <button id="createMonthBtn" class="btn primary" type="button">
+            <span class="icon">add_circle</span> Создать месяц
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREEN: ADD -->
+    <section id="screenAdd" class="screen">
+      <div class="tabs">
+        <button id="tabDonation" class="tab active" type="button">Пожертвование</button>
+        <button id="tabExpense" class="tab" type="button">Расход</button>
+      </div>
+
+      <!-- Donation form -->
+      <div id="addDonationWrap">
+        <div class="card bigCard">
+          <div id="donSundayWrap" class="rowBetween">
+            <div class="small muted">Дата (воскресенье)</div>
+            <div class="row" style="gap:8px;">
+              <button id="sunPrev" class="btnIcon" type="button" aria-label="Предыдущее воскресенье">
+                <span class="icon">chevron_left</span>
+              </button>
+              <span id="sunDateLabel" class="badge">—</span>
+              <button id="sunNext" class="btnIcon" type="button" aria-label="Следующее воскресенье">
+                <span class="icon">chevron_right</span>
+              </button>
+            </div>
+          </div>
+          <div id="donOtherDateWrap" class="field hidden" style="margin-top:8px;">
+            <label>Дата дохода</label>
+            <input id="donOtherDate" class="input" type="date" />
+          </div>
+
+          <div class="spacer12"></div>
+
+          <div class="form">
+            <div class="field">
+              <label>Тип дохода</label>
+              <div id="donIncomeTypeDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="donIncomeType" class="input hiddenSelect" tabindex="-1" aria-hidden="true">
+                <option value="donation">Пожертвование (10% Объединение)</option>
+                <option value="other">Иной доход (без 10%)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Безнал</label>
+              <input id="donCashless" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+            </div>
+            <div class="field">
+              <label>Наличные</label>
+              <input id="donCash" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+            </div>
+            <div class="field">
+              <label>Итого</label>
+              <input id="donTotal" class="input" type="text" readonly value="0.00" />
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="rowBetween">
+              <div>
+                <div class="tiny muted2">Минимум на воскресенье</div>
+                <div id="donWeeklyMin" class="bold mono" style="margin-top:4px;">—</div>
+              </div>
+              <div class="right">
+                <div id="donStatus" class="badge">—</div>
+                <div class="tiny muted2" style="margin-top:6px;">ПВС: <span id="donPvs" class="mono bold">—</span></div>
+              </div>
+            </div>
+
+            <div class="chips" id="donChips">
+              <div class="chip" data-add="100">+100</div>
+              <div class="chip" data-add="200">+200</div>
+              <div class="chip" data-add="500">+500</div>
+              <div class="chip" data-add="1000">+1000</div>
+              <div class="chip" id="copyPrevSunday"><span class="icon" style="font-size:18px">content_copy</span> Повторить прошлое</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stickyActions">
+          <div class="stickyInner">
+            <button id="saveDonationBtn" class="btn primary" type="button">
+              <span class="icon">check_circle</span> Сохранить
+            </button>
+            <button id="saveDonationNextBtn" class="btn ghost" type="button">
+              Сохранить и добавить следующее
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Expense form -->
+      <div id="addExpenseWrap" class="hidden">
+        <div id="draftsCard" class="card miniCard hidden">
+          <button id="openDraftsBtn" class="draftsCardBtn" type="button">
+            <div class="row">
+              <span class="icon">draft</span>
+              <span class="bold">Черновики</span>
+            </div>
+            <span id="draftsCount" class="draftCount">0</span>
+          </button>
+        </div>
+        <div class="card bigCard">
+          <div class="form">
+            <div class="field">
+              <label>Дата</label>
+              <input id="expDate" class="input" type="date" />
+            </div>
+
+            <div class="field">
+              <label>Категория</label>
+              <div id="expCategoryDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="expCategory" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+            </div>
+
+            <div class="field">
+              <label>Шаблон (один тап)</label>
+              <div id="expTemplateDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="expTemplate" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+              <div class="tiny muted2">Шаблоны редактируются в Настройках (локально).</div>
+            </div>
+
+            <div class="field">
+              <label>Название</label>
+              <input id="expTitle" class="input" type="text" placeholder="Напр. Оплата за зал" />
+            </div>
+
+            <div class="grid2">
+              <div class="field">
+                <label>Количество</label>
+                <input id="expQty" class="input" type="number" inputmode="decimal" value="1" />
+              </div>
+              <div class="field">
+                <label>Сумма</label>
+                <input id="expUnit" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Итог</label>
+              <input id="expTotal" class="input" type="text" readonly value="0.00" />
+            </div>
+
+            <div class="field">
+              <label>Комментарий</label>
+              <textarea id="expComment" class="input" rows="3" placeholder="Необязательно"></textarea>
+            </div>
+
+            <div id="expWarn" class="badge warn hidden">
+              <span class="icon" style="font-size:18px">warning</span>
+              Расход может превышать доступный баланс/СДДР
+            </div>
+          </div>
+        </div>
+
+        <div class="card bigCard" id="expenseAttachmentCard">
+          <div class="form">
+            <div class="rowBetween">
+              <div class="bold">Чек/скан</div>
+              <button id="expAttachBtn" class="btn small" type="button">
+                <span class="icon">photo_camera</span> Добавить
+              </button>
+            </div>
+            <input id="expAttachInput" type="file" class="hidden" multiple accept="image/jpeg,image/png,image/webp,application/pdf" />
+            <div id="expAttachGrid" class="attachmentGrid"></div>
+            <div id="expAttachHint" class="tiny muted2 attachHint">Файлы загрузятся после сохранения расхода.</div>
+          </div>
+        </div>
+
+        <div class="stickyActions">
+          <div class="stickyInner">
+            <button id="saveExpenseBtn" class="btn primary" type="button">
+              <span class="icon">check_circle</span> Сохранить расход
+            </button>
+            <button id="saveExpenseMoreBtn" class="btn ghost" type="button">
+              Сохранить и добавить ещё
+            </button>
+            <button id="saveExpenseDraftBtn" class="btn ghost" type="button">
+              В черновик
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREEN: HISTORY -->
+    <section id="screenHistory" class="screen">
+      <div class="tabs">
+        <button id="tabHistDon" class="tab active" type="button">Пожертвования</button>
+        <button id="tabHistExp" class="tab" type="button">Расходы</button>
+      </div>
+
+      <div class="card bigCard">
+        <div class="form" style="gap:10px;">
+          <div class="grid2">
+            <div class="field">
+              <label>Месяц</label>
+              <select id="histMonthSelect" class="input"></select>
+            </div>
+            <div class="field" id="histCatWrap">
+              <label>Категория</label>
+              <div id="histCategoryDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="histCategorySelect" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Поиск</label>
+            <input id="histSearch" class="input" type="text" placeholder="Название / комментарий" />
+          </div>
+        </div>
+      </div>
+
+      <div class="spacer12"></div>
+      <div id="histList" class="list"></div>
+      <div id="histEmpty" class="card bigCard hidden">
+        <div class="bold">Пусто</div>
+        <div class="tiny muted" style="margin-top:6px;">Добавьте записи через вкладку «Добавить».</div>
+      </div>
+    </section>
+
+    <!-- SCREEN: SETTINGS -->
+    <section id="screenSettings" class="screen">
+      <div id="settingsDenied" class="card bigCard hidden">
+        <div class="bold">Недоступно</div>
+        <div class="tiny muted" style="margin-top:6px;">У вашей роли нет доступа к настройкам.</div>
+      </div>
+
+      <div id="settingsWrap" class="hidden">
+        <div class="section" id="reportsSection">
+          <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
+          <div class="card bigCard">
+            <div class="form">
+              <div class="field">
+                <label>chat_id (куда отправлять)</label>
+                <input id="setChatId" class="input" type="number" inputmode="numeric" placeholder="Напр. -100123..." />
+              </div>
+              <div class="grid2">
+                <div class="field">
+                  <label>Время воскресного отчёта</label>
+                  <input id="setSundayTime" class="input" type="time" />
+                </div>
+                <div class="field">
+                  <label>Время ежедневного отчёта расходов</label>
+                  <input id="setDailyTime" class="input" type="time" />
+                </div>
+              </div>
+              <div class="field">
+                <label>Ежедневный отчёт расходов</label>
+                <select id="setDailyEnabled" class="input">
+                  <option value="0">Выключено</option>
+                  <option value="1">Включено</option>
+                </select>
+              </div>
+              <button id="saveSettingsBtn" class="btn primary" type="button">
+                <span class="icon">save</span> Сохранить отчёты
+              </button>
+              <div class="row" style="gap:10px; flex-wrap:wrap;">
+                <button id="sendSundayNowBtn" class="btn small" type="button">
+                  <span class="icon">send</span> Воскресный отчёт сейчас
+                </button>
+                <button id="sendExpensesNowBtn" class="btn small" type="button">
+                  <span class="icon">send</span> Расходы сейчас
+                </button>
+                <button id="sendTestReportBtn" class="btn small" type="button">
+                  <span class="icon">check_circle</span> Тест отправки отчёта
+                </button>
+              </div>
+              <div class="tiny muted2">Важно: chat_id должен быть установлен заранее.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section" id="monthSection">
+          <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
+          <div class="card bigCard">
+            <div class="form">
+              <div class="field">
+                <label>МНСП на месяц</label>
+                <input id="setMonthlyMin" class="input" type="number" inputmode="decimal" placeholder="Напр. 41502.16" />
+              </div>
+              <div class="field">
+                <label>Режим воскресений (4/5)</label>
+                <select id="setSundaysOverride" class="input">
+                  <option value="">Авто (по календарю)</option>
+                  <option value="4">Вручную: 4</option>
+                  <option value="5">Вручную: 5</option>
+                </select>
+              </div>
+              <div class="grid2">
+                <div class="field">
+                  <label>Стартовый остаток</label>
+                  <input id="setStartBalance" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+                </div>
+                <div class="field">
+                  <label>Часовой пояс</label>
+                  <input id="setTimezone" class="input" type="text" placeholder="Europe/Warsaw" />
+                </div>
+              </div>
+              <button id="saveMonthSettingsBtn" class="btn primary" type="button">
+                <span class="icon">tune</span> Сохранить месяц
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section" id="themeSection">
+          <div class="sectionHeader"><h3>Тема интерфейса</h3></div>
+          <div class="card bigCard">
+            <div class="form">
+              <div class="field">
+                <label>Тема</label>
+                <select id="setTheme" class="input">
+                  <option value="auto">Системная</option>
+                  <option value="light">Светлая</option>
+                  <option value="dark">Тёмная</option>
+                </select>
+              </div>
+              <button id="saveThemeBtn" class="btn primary" type="button">
+                <span class="icon">palette</span> Сохранить тему
+              </button>
+              <div class="tiny muted2">Изменение темы влияет на всех пользователей.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section" id="categoriesSection">
+          <div class="sectionHeader">
+            <h3>Категории</h3>
+            <button id="addCategoryBtn" class="btn small" type="button">
+              <span class="icon">add</span> Новая
+            </button>
+          </div>
+          <div id="categoriesList" class="list"></div>
+          <div id="categoriesEmpty" class="tiny muted2">Категорий пока нет.</div>
+        </div>
+
+        <div class="section" id="templatesSection">
+          <div class="sectionHeader"><h3>Шаблоны расходов (локально)</h3></div>
+          <div class="card bigCard">
+            <div class="form">
+              <div class="tiny muted2">Хранится в устройстве (localStorage). Можно быстро вводить расходы «в один тап».</div>
+              <textarea id="templatesJson" class="input" rows="8" spellcheck="false"></textarea>
+              <button id="saveTemplatesBtn" class="btn primary" type="button">
+                <span class="icon">save</span> Сохранить шаблоны
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section" id="exportSection">
+          <div class="sectionHeader"><h3>Экспорт</h3></div>
+          <div class="card bigCard">
+            <div class="row" style="gap:10px; flex-wrap:wrap;">
+              <button id="exportCsvBtn" class="btn" type="button">
+                <span class="icon">download</span> Скачать CSV (месяц)
+              </button>
+              <button id="exportXlsxBtn" class="btn" type="button">
+                <span class="icon">download</span> Скачать Excel (год)
+              </button>
+            </div>
+            <div class="tiny muted2" style="margin-top:8px;">Откроется в браузере Telegram (скачивание зависит от клиента).</div>
+          </div>
+        </div>
+
+        <div class="section" id="usersSection">
+          <div class="sectionHeader"><h3>Пользователи</h3></div>
+          <div class="card bigCard">
+            <div class="tiny muted2">Управление пользователями — через users.json (MVP). UI-редактор можно добавить позже.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Category name modal -->
+  <div id="categoryNameModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div id="categoryNameTitle" class="h">Новая категория</div>
+        <button id="closeCategoryNameModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="field">
+            <label>Название</label>
+            <input id="categoryNameInput" class="input" type="text" placeholder="Напр. Коммуналка" />
+          </div>
+          <button id="saveCategoryNameBtn" class="btn primary" type="button">
+            <span class="icon">save</span> Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category merge modal -->
+  <div id="categoryMergeModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Объединить категории</div>
+        <button id="closeCategoryMergeModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="field">
+            <label>Target категория</label>
+            <select id="mergeTargetSelect" class="input"></select>
+          </div>
+          <div class="field">
+            <label>Source категории</label>
+            <div id="mergeSources" class="chips"></div>
+          </div>
+          <div class="badge bad">
+            <span class="icon" style="font-size:16px;">warning</span>
+            операция изменит историю
+          </div>
+          <button id="mergeConfirmBtn" class="btn danger" type="button">
+            <span class="icon">merge_type</span> Объединить
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Month picker modal -->
+  <div id="monthModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Выбор месяца</div>
+        <button id="closeMonthModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="grid2">
+            <div class="field">
+              <label>Год</label>
+              <select id="yearSelect" class="input"></select>
+            </div>
+            <div class="field">
+              <label>Месяц</label>
+              <select id="monthSelect" class="input"></select>
+            </div>
+          </div>
+          <button id="applyMonthBtn" class="btn primary" type="button">
+            <span class="icon">check</span> Применить
+          </button>
+          <div class="tiny muted2">Если месяца нет в базе — создайте его (роль admin).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drafts modal -->
+  <div id="draftsModal" class="modalBackdrop draftModal">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Черновики</div>
+        <button id="closeDraftsModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div id="draftsList" class="draftList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit modal -->
+  <div id="editModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div id="editTitle" class="h">Детали</div>
+        <button id="closeEditModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div id="editBody" class="form"></div>
+        <div class="spacer12"></div>
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <button id="editSaveBtn" class="btn primary" type="button"><span class="icon">save</span> Сохранить</button>
+          <button id="editDeleteBtn" class="btn" type="button"><span class="icon">delete</span> Удалить</button>
+          <button id="editDuplicateBtn" class="btn" type="button"><span class="icon">content_copy</span> Дублировать</button>
+        </div>
+        <div id="editHint" class="tiny muted2" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attachment viewer modal -->
+  <div id="viewerModal" class="modalBackdrop viewerModal">
+    <div class="modal">
+      <div class="modalHeader">
+        <div id="viewerTitle" class="h">Чек/скан</div>
+        <button id="closeViewerModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div id="viewerContent" class="viewerContent"></div>
+        <div class="spacer12"></div>
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <button id="viewerDeleteBtn" class="btn" type="button"><span class="icon">delete</span> Удалить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**********************
+     * Utilities
+     **********************/
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+    const fmtMoney = (n) => {
+      if (n === null || n === undefined || Number.isNaN(Number(n))) return "—";
+      const x = Number(n);
+      return x.toLocaleString("ru-RU", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    };
+    const fmtPercent = (v, digits=1) => {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+      const pct = Number(v) * 100;
+      return `${pct.toFixed(digits)}%`;
+    };
+    const fmtShortDate = (iso) => {
+      try {
+        const d = new Date(iso + "T00:00:00");
+        return d.toLocaleDateString("ru-RU", {day:"2-digit", month:"2-digit"});
+      } catch { return iso; }
+    };
+    const fmtLongDate = (iso) => {
+      try {
+        const d = new Date(iso + "T00:00:00");
+        return d.toLocaleDateString("ru-RU", {day:"2-digit", month:"2-digit", year:"numeric"});
+      } catch { return iso; }
+    };
+    const toIsoDateLocal = (dateObj) => {
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, "0");
+      const d = String(dateObj.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    };
+    const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+    const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+    const ATTACHMENT_LIMIT = 10;
+    const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+    const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf";
+
+    function monthNameRu(m){ // 1..12
+      const names = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+      return names[(m-1)||0] || "—";
+    }
+
+    function setToast(text="Сохранено"){
+      const card = $("#toastCard");
+      card.querySelector(".bold").textContent = text;
+      card.classList.add("show");
+      setTimeout(()=>card.classList.remove("show"), 1400);
+    }
+
+    /**********************
+     * Telegram init + theme
+     **********************/
+    const tg = window.Telegram?.WebApp;
+    const ThemeState = {
+      mode: "auto",
+      media: window.matchMedia?.("(prefers-color-scheme: dark)")
+    };
+
+    function detectTelegramTheme(){
+      const p = tg?.themeParams || {};
+      if (!p.bg_color) return null;
+      const hex = p.bg_color.replace("#","");
+      if (hex.length !== 6) return null;
+      const r = parseInt(hex.slice(0,2),16);
+      const g = parseInt(hex.slice(2,4),16);
+      const b = parseInt(hex.slice(4,6),16);
+      const lum = 0.2126*r + 0.7152*g + 0.0722*b;
+      return (lum > 180) ? "light" : "dark";
+    }
+
+    const tgThemeParams = tg?.themeParams || {};
+
+    function applyTelegramThemeVars(theme){
+      const root = document.documentElement.style;
+      const isDark = theme === "dark";
+      if (!isDark) {
+        root.removeProperty("--bg");
+        root.removeProperty("--card");
+        root.removeProperty("--card2");
+        root.removeProperty("--text");
+        root.removeProperty("--muted");
+        root.removeProperty("--muted2");
+        return;
+      }
+      if (tgThemeParams.bg_color) root.setProperty("--bg", tgThemeParams.bg_color);
+      if (tgThemeParams.secondary_bg_color) {
+        root.setProperty("--card", hexToRgba(tgThemeParams.secondary_bg_color, .65));
+        root.setProperty("--card2", hexToRgba(tgThemeParams.secondary_bg_color, .75));
+      }
+      if (tgThemeParams.text_color) root.setProperty("--text", hexToRgba(tgThemeParams.text_color, .92));
+      if (tgThemeParams.hint_color) {
+        root.setProperty("--muted", hexToRgba(tgThemeParams.hint_color, .72));
+        root.setProperty("--muted2", hexToRgba(tgThemeParams.hint_color, .5));
+      }
+    }
+
+    function applyTheme(mode){
+      const normalized = (mode || "auto").toLowerCase();
+      ThemeState.mode = (normalized === "system") ? "auto" : normalized;
+      let theme = ThemeState.mode;
+      if (theme === "auto") {
+        theme = detectTelegramTheme() || (ThemeState.media?.matches ? "dark" : "light");
+      }
+      document.documentElement.dataset.theme = theme;
+      applyTelegramThemeVars(theme);
+    }
+
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
+
+    ThemeState.media?.addEventListener?.("change", ()=>{
+      if (ThemeState.mode === "auto") applyTheme("auto");
+    });
+
+    function hexToRgba(hex, a){
+      try{
+        const h = hex.replace("#","");
+        const r = parseInt(h.slice(0,2),16);
+        const g = parseInt(h.slice(2,4),16);
+        const b = parseInt(h.slice(4,6),16);
+        return `rgba(${r},${g},${b},${a})`;
+      }catch{ return ""; }
+    }
+
+    /**********************
+     * API layer
+     **********************/
+    const API = {
+      token: null,
+      user: null,
+      baseUrl: location.origin, // same host
+      async auth(){
+        const initData = tg?.initData || "";
+        if (!initData) throw new Error("Нет initData. Откройте через Telegram.");
+        const res = await fetch(`${API.baseUrl}/api/auth/telegram`,{
+          method:"POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({initData})
+        });
+        if (!res.ok) {
+          const t = await res.text().catch(()=> "");
+          throw new Error(`Auth failed: ${res.status} ${t}`);
+        }
+        const data = await res.json();
+        API.token = data.token;
+        API.user = data.user;
+        localStorage.setItem("sessionToken", API.token);
+        localStorage.setItem("sessionUser", JSON.stringify(API.user));
+        return data;
+      },
+      async ensureAuth(){
+        if (!API.token) {
+          API.token = localStorage.getItem("sessionToken");
+          try { API.user = JSON.parse(localStorage.getItem("sessionUser")||"null"); } catch { API.user=null; }
+        }
+        if (!API.token) return API.auth();
+        // cheap /api/me check
+        try{
+          await API.get("/api/me");
+        }catch(e){
+          return API.auth();
+        }
+      },
+      async get(path){
+        return API.req(path, {method:"GET"});
+      },
+      async getBlob(path){
+        const headers = {};
+        if (API.token) headers["Authorization"] = `Bearer ${API.token}`;
+        const res = await fetch(`${API.baseUrl}${path}`, { method: "GET", headers });
+        if (res.status === 401 || res.status === 403) {
+          const txt = await res.text().catch(()=> "");
+          throw new Error(`${res.status}: ${txt || "Unauthorized"}`);
+        }
+        if (!res.ok) {
+          const txt = await res.text().catch(()=> "");
+          throw new Error(`${res.status}: ${txt || "Request failed"}`);
+        }
+        return res.blob();
+      },
+      async post(path, body){
+        return API.req(path, {method:"POST", body: JSON.stringify(body)});
+      },
+      async put(path, body){
+        return API.req(path, {method:"PUT", body: JSON.stringify(body)});
+      },
+      async del(path){
+        return API.req(path, {method:"DELETE"});
+      },
+      async req(path, opts={}){
+        const headers = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
+        if (API.token) headers["Authorization"] = `Bearer ${API.token}`;
+        const res = await fetch(`${API.baseUrl}${path}`, { ...opts, headers });
+        if (res.status === 401 || res.status === 403) {
+          // bubble for caller to reauth UI if needed
+          const txt = await res.text().catch(()=> "");
+          throw new Error(`${res.status}: ${txt || "Unauthorized"}`);
+        }
+        if (!res.ok) {
+          const txt = await res.text().catch(()=> "");
+          throw new Error(`${res.status}: ${txt || "Request failed"}`);
+        }
+        const ctype = (res.headers.get("content-type")||"");
+        if (ctype.includes("application/json")) return res.json();
+        return res.text();
+      }
+    };
+
+    /**********************
+     * App state
+     **********************/
+    const State = {
+      year: null,
+      month: null,
+      monthId: null,
+      role: "viewer",
+
+      summary: null,
+      services: [],
+      expenses: [],
+      yearAnalytics: null,
+
+      sundayDates: [],
+      sundayIndex: 0,
+      otherIncomeDate: null,
+
+      charts: {
+        sundayBar: null,
+        expensePie: null,
+        yearLine: null,
+        yearBalanceBar: null,
+      },
+
+      historyMode: "don", // don|exp
+      monthCache: new Map(), // key "YYYY-MM" -> {id,...}
+      monthsList: [],
+
+      templates: [],
+      categories: [],
+      categoryItems: [],
+      attachmentsByExpense: new Map(),
+      pendingExpenseFiles: [],
+      drafts: [],
+    };
+
+    /**********************
+     * Attachments
+     **********************/
+    const AttachmentBlobCache = new Map();
+    function clearAttachmentBlobCache(){
+      for (const url of AttachmentBlobCache.values()){
+        URL.revokeObjectURL(url);
+      }
+      AttachmentBlobCache.clear();
+    }
+    function revokeAttachmentBlob(attachmentId){
+      const key = Number(attachmentId);
+      const url = AttachmentBlobCache.get(key);
+      if (url){
+        URL.revokeObjectURL(url);
+        AttachmentBlobCache.delete(key);
+      }
+    }
+    async function getAttachmentBlobUrl(attachmentId){
+      const key = Number(attachmentId);
+      if (AttachmentBlobCache.has(key)) return AttachmentBlobCache.get(key);
+      const blob = await API.getBlob(`/api/attachments/${key}?inline=1`);
+      const url = URL.createObjectURL(blob);
+      AttachmentBlobCache.set(key, url);
+      return url;
+    }
+    async function loadAttachmentImage(img, attachmentId){
+      try{
+        const url = await getAttachmentBlobUrl(attachmentId);
+        img.src = url;
+      }catch(e){
+        img.alt = "Ошибка загрузки";
+      }
+    }
+    function isMonthClosed(){
+      return Boolean(State.summary?.month?.is_closed);
+    }
+    function canEditAttachments(){
+      const canRole = (State.role === "admin" || State.role === "accountant");
+      return canRole && !isMonthClosed();
+    }
+    function setExpenseAttachments(expenseId, items){
+      State.attachmentsByExpense.set(Number(expenseId), items || []);
+    }
+    function getExpenseAttachments(expenseId){
+      return State.attachmentsByExpense.get(Number(expenseId)) || [];
+    }
+    async function fetchExpenseAttachments(expenseId){
+      const data = await API.get(`/api/expenses/${expenseId}/attachments`);
+      const items = data.items || [];
+      setExpenseAttachments(expenseId, items);
+      return items;
+    }
+    async function deleteAttachment(attachment, expenseId, grid){
+      if (!canEditAttachments()) return false;
+      const ok = confirm("Удалить файл?");
+      if (!ok) return false;
+      await API.del(`/api/attachments/${attachment.id}`);
+      revokeAttachmentBlob(attachment.id);
+      const items = await fetchExpenseAttachments(expenseId);
+      if (grid) renderAttachmentGrid(grid, items, expenseId, {showEmpty:true});
+      await refreshAll();
+      setToast("Удалено");
+      return true;
+    }
+    function buildAttachmentThumb(attachment, expenseId, grid){
+      const div = document.createElement("div");
+      div.className = "attachThumb";
+      const mime = (attachment.mime || "").toLowerCase();
+      const isPdf = mime.includes("pdf");
+      if (isPdf){
+        div.innerHTML = `
+          <div class="attachBadge">PDF</div>
+          <span class="icon attachIcon">picture_as_pdf</span>
+        `;
+      } else {
+        const img = document.createElement("img");
+        img.alt = "Загрузка...";
+        div.appendChild(img);
+        loadAttachmentImage(img, attachment.id);
+      }
+      if (canEditAttachments()){
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "attachRemove";
+        removeBtn.innerHTML = `<span class="icon">close</span>`;
+        removeBtn.addEventListener("click", async (e)=>{
+          e.stopPropagation();
+          try{
+            await deleteAttachment(attachment, expenseId, grid);
+          }catch(err){
+            alert(String(err.message || err));
+          }
+        });
+        div.appendChild(removeBtn);
+      }
+      div.addEventListener("click", ()=> { void openAttachmentViewer(attachment, expenseId); });
+      requestAnimationFrame(()=> div.classList.add("show"));
+      return div;
+    }
+    function buildQueuedThumb(file, index){
+      const div = document.createElement("div");
+      div.className = "attachThumb attachQueued show";
+      const isPdf = (file.type || "").includes("pdf");
+      if (isPdf){
+        div.innerHTML = `
+          <div class="attachBadge">PDF</div>
+          <span class="icon attachIcon">schedule</span>
+        `;
+      } else {
+        const img = document.createElement("img");
+        img.src = URL.createObjectURL(file);
+        div.appendChild(img);
+      }
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "attachRemove";
+      removeBtn.innerHTML = `<span class="icon">close</span>`;
+      removeBtn.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        removePendingExpenseFile(index);
+      });
+      div.appendChild(removeBtn);
+      return div;
+    }
+    function renderAttachmentGrid(grid, items, expenseId, {showEmpty=false} = {}){
+      grid.innerHTML = "";
+      if (!items.length){
+        if (showEmpty){
+          const empty = document.createElement("div");
+          empty.className = "tiny muted2";
+          empty.textContent = "Нет файлов";
+          grid.appendChild(empty);
+        }
+        return;
+      }
+      items.forEach((att)=> grid.appendChild(buildAttachmentThumb(att, expenseId, grid)));
+    }
+    function createUploadSkeleton(){
+      const wrap = document.createElement("div");
+      wrap.className = "attachSkeleton";
+      const progress = document.createElement("div");
+      progress.className = "attachProgress";
+      wrap.appendChild(progress);
+      return {wrap, progress};
+    }
+    function uploadAttachment(expenseId, file, onProgress){
+      return new Promise((resolve, reject)=>{
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${API.baseUrl}/api/expenses/${expenseId}/attachments`);
+        if (API.token) xhr.setRequestHeader("Authorization", `Bearer ${API.token}`);
+        xhr.onload = ()=>{
+          const ok = xhr.status >= 200 && xhr.status < 300;
+          if (!ok){
+            reject(new Error(`${xhr.status}: ${xhr.responseText || "Upload failed"}`));
+            return;
+          }
+          try{
+            const data = JSON.parse(xhr.responseText);
+            resolve(data);
+          }catch(e){
+            reject(new Error("Invalid upload response"));
+          }
+        };
+        xhr.onerror = ()=> reject(new Error("Upload failed"));
+        xhr.upload.onprogress = (e)=>{
+          if (e.lengthComputable && typeof onProgress === "function"){
+            onProgress(e.loaded / e.total);
+          }
+        };
+        const form = new FormData();
+        form.append("file", file);
+        xhr.send(form);
+      });
+    }
+    async function uploadExpenseAttachments(expenseId, files, grid){
+      if (!canEditAttachments()){
+        alert("Загрузка недоступна.");
+        return;
+      }
+      if (!files.length) return;
+      const existing = getExpenseAttachments(expenseId);
+      if (existing.length >= ATTACHMENT_LIMIT){
+        alert("Достигнут лимит вложений (10).");
+        return;
+      }
+
+      const queue = Array.from(files).filter((file)=> file);
+      const filtered = [];
+      for (const file of queue){
+        if (!ATTACHMENT_ACCEPT.split(",").includes(file.type)){
+          alert(`Тип файла не поддерживается: ${file.name}`);
+          continue;
+        }
+        if (file.size > ATTACHMENT_MAX_BYTES){
+          alert(`Файл слишком большой (до 10 МБ): ${file.name}`);
+          continue;
+        }
+        filtered.push(file);
+      }
+      if (!filtered.length) return;
+      if (existing.length + filtered.length > ATTACHMENT_LIMIT){
+        alert("Превышен лимит вложений на расход (10).");
+        return;
+      }
+
+      grid.innerHTML = "";
+      for (const file of filtered){
+        const {wrap, progress} = createUploadSkeleton();
+        grid.appendChild(wrap);
+        try{
+          const result = await uploadAttachment(expenseId, file, (pct)=>{
+            progress.style.width = `${Math.round(pct * 100)}%`;
+          });
+          const attachment = result.attachment;
+          if (attachment){
+            const thumb = buildAttachmentThumb(attachment, expenseId, grid);
+            grid.replaceChild(thumb, wrap);
+          }
+        }catch(e){
+          wrap.classList.add("attachQueued");
+          wrap.innerHTML = `<div class="attachBadge">Ошибка</div>`;
+          alert(String(e.message || e));
+        }
+      }
+      const items = await fetchExpenseAttachments(expenseId);
+      renderAttachmentGrid(grid, items, expenseId, {showEmpty:true});
+    }
+
+    const Viewer = { attachment: null, expenseId: null };
+
+    async function openAttachmentViewer(attachment, expenseId){
+      Viewer.attachment = attachment;
+      Viewer.expenseId = expenseId;
+      $("#viewerTitle").textContent = attachment.orig_filename || "Чек/скан";
+      const content = $("#viewerContent");
+      content.innerHTML = `<div class="tiny muted2">Загрузка...</div>`;
+      const mime = (attachment.mime || "").toLowerCase();
+      let url = "";
+      try{
+        url = await getAttachmentBlobUrl(attachment.id);
+      }catch(e){
+        content.innerHTML = `<div class="tiny muted2">Не удалось загрузить файл</div>`;
+        return;
+      }
+      content.innerHTML = "";
+      if (mime.includes("pdf")){
+        const frame = document.createElement("iframe");
+        frame.src = url;
+        content.appendChild(frame);
+      } else {
+        const img = document.createElement("img");
+        img.src = url;
+        content.appendChild(img);
+      }
+      const canDelete = canEditAttachments();
+      $("#viewerDeleteBtn").classList.toggle("hidden", !canDelete);
+      $("#viewerDeleteBtn").disabled = !canDelete;
+      $("#viewerModal").classList.add("show");
+    }
+    function closeViewerModal(){
+      $("#viewerModal").classList.remove("show");
+      Viewer.attachment = null;
+      Viewer.expenseId = null;
+    }
+    function renderPendingExpenseAttachments(){
+      const grid = $("#expAttachGrid");
+      grid.innerHTML = "";
+      if (!State.pendingExpenseFiles.length) return;
+      State.pendingExpenseFiles.forEach((file, index)=> grid.appendChild(buildQueuedThumb(file, index)));
+    }
+    function removePendingExpenseFile(index){
+      State.pendingExpenseFiles.splice(index, 1);
+      renderPendingExpenseAttachments();
+    }
+    function addPendingExpenseFiles(fileList){
+      const queue = Array.from(fileList || []);
+      if (!queue.length) return;
+      const filtered = [];
+      for (const file of queue){
+        if (!ATTACHMENT_ACCEPT.split(",").includes(file.type)){
+          alert(`Тип файла не поддерживается: ${file.name}`);
+          continue;
+        }
+        if (file.size > ATTACHMENT_MAX_BYTES){
+          alert(`Файл слишком большой (до 10 МБ): ${file.name}`);
+          continue;
+        }
+        filtered.push(file);
+      }
+      if (!filtered.length) return;
+      const total = State.pendingExpenseFiles.length + filtered.length;
+      if (total > ATTACHMENT_LIMIT){
+        alert("Превышен лимит вложений на расход (10).");
+        return;
+      }
+      State.pendingExpenseFiles = State.pendingExpenseFiles.concat(filtered);
+      renderPendingExpenseAttachments();
+    }
+
+    /**********************
+     * Drafts
+     **********************/
+    function canSeeDrafts(){
+      return State.role === "admin" || State.role === "accountant";
+    }
+    async function loadDrafts(){
+      if (!State.monthId || !canSeeDrafts()){
+        State.drafts = [];
+        renderDraftsCard();
+        return;
+      }
+      const scope = (State.role === "admin") ? "all" : "mine";
+      try{
+        const data = await API.get(`/api/months/${State.monthId}/drafts?kind=expense&scope=${scope}`);
+        State.drafts = data.items || [];
+      }catch(e){
+        State.drafts = [];
+      }
+      renderDraftsCard();
+    }
+    function renderDraftsCard(){
+      const card = $("#draftsCard");
+      if (!card) return;
+      if (!canSeeDrafts() || !State.monthId){
+        card.classList.add("hidden");
+        return;
+      }
+      card.classList.remove("hidden");
+      $("#draftsCount").textContent = String(State.drafts.length || 0);
+    }
+    function openDraftsModal(){
+      if (!canSeeDrafts()) return;
+      renderDraftsList();
+      $("#draftsModal").classList.add("show");
+    }
+    function closeDraftsModal(){
+      $("#draftsModal").classList.remove("show");
+    }
+    function ensureExpenseCategoryOption(category){
+      if (!category) return;
+      const sel = $("#expCategory");
+      const exists = Array.from(sel.options).some((opt)=> opt.value === category);
+      if (!exists){
+        const o = document.createElement("option");
+        o.value = category;
+        o.textContent = category;
+        sel.appendChild(o);
+      }
+    }
+    function applyDraftToForm(draft){
+      const payload = draft.payload || {};
+      const date = payload.expense_date || toIsoDateLocal(new Date());
+      const category = payload.category || "Прочее";
+      const title = payload.title || "Расход";
+      const qty = payload.qty ?? 1;
+      const unit = payload.unit_amount ?? 0;
+      const comment = payload.comment || "";
+
+      switchScreen("add");
+      setAddTab("exp");
+      $("#expDate").value = date;
+      ensureExpenseCategoryOption(category);
+      $("#expCategory").value = category;
+      syncDropdown("expCategory");
+      $("#expTitle").value = title;
+      $("#expQty").value = String(qty);
+      $("#expUnit").value = String(unit);
+      $("#expComment").value = comment;
+      recalcExpenseTotals();
+      updateWarningsExpenseForm();
+      closeDraftsModal();
+    }
+    function buildDraftPayloadFromForm(){
+      const date = $("#expDate").value || toIsoDateLocal(new Date());
+      const qtyRaw = $("#expQty").value;
+      const unitRaw = $("#expUnit").value;
+      const qty = (qtyRaw === "" || qtyRaw === null) ? 1 : Number(qtyRaw || 1);
+      const unit_amount = (unitRaw === "" || unitRaw === null) ? 0 : Number(unitRaw || 0);
+      const category = ($("#expCategory").value || "").trim() || "Прочее";
+      const title = ($("#expTitle").value || "").trim() || "Расход";
+      const commentRaw = ($("#expComment").value || "").trim();
+      const comment = commentRaw ? commentRaw : null;
+      return { expense_date: date, category, title, qty, unit_amount, comment };
+    }
+    function renderDraftsList(){
+      const list = $("#draftsList");
+      list.innerHTML = "";
+      if (!State.drafts.length){
+        list.innerHTML = `<div class="tiny muted">Нет черновиков</div>`;
+        return;
+      }
+      State.drafts.forEach((draft)=>{
+        const payload = draft.payload || {};
+        const summary = draft.summary || {};
+        const title = summary.title || payload.title || "Расход";
+        const category = summary.category || payload.category || "Прочее";
+        const expenseDate = summary.expense_date || payload.expense_date || "";
+        const total = summary.total ?? (Number(payload.qty || 0) * Number(payload.unit_amount || 0));
+
+        const item = document.createElement("div");
+        item.className = "draftItem";
+
+        const main = document.createElement("div");
+        main.className = "draftMain";
+
+        const left = document.createElement("div");
+        left.innerHTML = `
+          <div class="draftTitle">${escapeHtml(title)}</div>
+          <div class="draftMeta">${escapeHtml(category)}${expenseDate ? ` • ${fmtShortDate(expenseDate)}` : ""}</div>
+        `;
+
+        const right = document.createElement("div");
+        right.className = "draftAmount";
+        right.textContent = fmtMoney(total);
+
+        main.appendChild(left);
+        main.appendChild(right);
+
+        const actions = document.createElement("div");
+        actions.className = "draftActions";
+
+        const openBtn = document.createElement("button");
+        openBtn.className = "btn small";
+        openBtn.type = "button";
+        openBtn.textContent = "Открыть";
+        openBtn.addEventListener("click", ()=> applyDraftToForm(draft));
+
+        const submitBtn = document.createElement("button");
+        submitBtn.className = "btn primary small";
+        submitBtn.type = "button";
+        submitBtn.textContent = "Провести";
+        submitBtn.addEventListener("click", async ()=>{
+          try{
+            await API.post(`/api/drafts/${draft.id}/submit`, {});
+            setToast("Проведено");
+            await refreshAll();
+            await loadDrafts();
+            renderDraftsList();
+          }catch(e){
+            alert(String(e.message || e));
+          }
+        });
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "btn small";
+        deleteBtn.type = "button";
+        deleteBtn.textContent = "Удалить";
+        deleteBtn.addEventListener("click", async ()=>{
+          const ok = confirm("Удалить черновик?");
+          if (!ok) return;
+          try{
+            await API.del(`/api/drafts/${draft.id}`);
+            const height = item.offsetHeight;
+            item.style.height = `${height}px`;
+            requestAnimationFrame(()=>{
+              item.classList.add("removing");
+              item.style.height = "0px";
+            });
+            State.drafts = State.drafts.filter((d)=> d.id !== draft.id);
+            renderDraftsCard();
+            setTimeout(()=>{
+              renderDraftsList();
+            }, 200);
+            setToast("Удалено");
+          }catch(e){
+            alert(String(e.message || e));
+          }
+        });
+
+        actions.appendChild(openBtn);
+        actions.appendChild(submitBtn);
+        actions.appendChild(deleteBtn);
+
+        item.appendChild(main);
+        item.appendChild(actions);
+        list.appendChild(item);
+      });
+    }
+    async function saveExpenseDraft(){
+      if (!State.monthId) {
+        alert("Месяц не создан. Попросите админа создать месяц.");
+        return;
+      }
+      if (!canSeeDrafts()){
+        alert("У вашей роли нет прав на изменение данных.");
+        return;
+      }
+      const payload = buildDraftPayloadFromForm();
+      await API.post(`/api/months/${State.monthId}/drafts/expenses`, payload);
+      setToast("Черновик сохранён");
+      await loadDrafts();
+      resetExpenseForm();
+    }
+
+    /**********************
+     * Templates (local)
+     **********************/
+    function defaultTemplates(){
+      return [
+        {title:"Оплата за зал", category:"Зал", unit_amount:2500},
+        {title:"Аренда офис 1", category:"Аренда", unit_amount:6200},
+        {title:"Аренда офис 2", category:"Аренда", unit_amount:10000},
+        {title:"Зп пастора", category:"ЗП", unit_amount:10000},
+        {title:"Благословение пастора", category:"Благословение", unit_amount:4000},
+      ];
+    }
+    function loadTemplates(){
+      const raw = localStorage.getItem("expenseTemplates");
+      if (!raw) {
+        State.templates = defaultTemplates();
+        saveTemplatesToStorage();
+        return;
+      }
+      try {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) State.templates = arr;
+        else State.templates = defaultTemplates();
+      } catch {
+        State.templates = defaultTemplates();
+      }
+    }
+    function saveTemplatesToStorage(){
+      localStorage.setItem("expenseTemplates", JSON.stringify(State.templates, null, 2));
+    }
+    function rebuildTemplateSelect(){
+      const sel = $("#expTemplate");
+      sel.innerHTML = "";
+      const opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = "— Выбрать шаблон —";
+      sel.appendChild(opt0);
+      State.templates.forEach((t, i)=>{
+        const o = document.createElement("option");
+        o.value = String(i);
+        o.textContent = `${t.title} — ${fmtMoney(t.unit_amount)}`;
+        sel.appendChild(o);
+      });
+      syncDropdown("expTemplate");
+    }
+
+    /**********************
+     * Month utils
+     **********************/
+    function keyYM(y,m){ return `${y}-${String(m).padStart(2,"0")}`; }
+
+    function todayYMD(){
+      const d = new Date();
+      return {y:d.getFullYear(), m:d.getMonth()+1, d:d.getDate()};
+    }
+
+    function computeSundays(y, m){
+      // JS Date: month 0..11
+      const sundays = [];
+      const first = new Date(y, m-1, 1);
+      const last = new Date(y, m, 0);
+      for(let day=1; day<=last.getDate(); day++){
+        const d = new Date(y, m-1, day);
+        if (d.getDay() === 0) { // Sunday 0
+          sundays.push(toIsoDateLocal(d));
+        }
+      }
+      return sundays;
+    }
+
+    function setMonthTitle(){
+      $("#monthTitle").textContent = `${monthNameRu(State.month)} ${State.year}`;
+      $("#monthMeta").textContent = State.monthId ? `ID месяца: ${State.monthId}` : "—";
+    }
+
+    async function loadMonthsForYear(y){
+      const data = await API.get(`/api/months?year=${encodeURIComponent(y)}`);
+      State.monthsList = data.items || [];
+      State.monthCache.clear();
+      for(const item of State.monthsList){
+        State.monthCache.set(keyYM(item.year, item.month), item);
+      }
+      rebuildHistoryMonthSelect();
+    }
+
+    async function loadYearAnalytics(){
+      const data = await API.get(`/api/analytics/year?year=${encodeURIComponent(State.year)}`);
+      State.yearAnalytics = data;
+    }
+
+    async function loadCategories(){
+      try{
+        const data = await API.get("/api/categories");
+        State.categoryItems = data.items || [];
+      }catch(e){
+        State.categoryItems = [];
+      }
+      rebuildCategories();
+      renderCategoriesSection();
+    }
+
+    async function ensureSelectedMonthExists(){
+      const k = keyYM(State.year, State.month);
+      const m = State.monthCache.get(k);
+      if (m) {
+        State.monthId = m.id;
+        $("#dashEmptyState").classList.add("hidden");
+        return true;
+      }
+      State.monthId = null;
+      $("#dashEmptyState").classList.remove("hidden");
+      return false;
+    }
+
+    function refreshSundayDates(){
+      State.sundayDates = computeSundays(State.year, State.month);
+      if (State.sundayDates.length === 0) {
+        State.sundayIndex = 0;
+        return;
+      }
+      State.sundayIndex = clamp(findDefaultSundayIndex(), 0, State.sundayDates.length - 1);
+    }
+
+    async function createMonthIfAdmin(){
+      if (State.role !== "admin") {
+        alert("Только admin может создавать месяц.");
+        return;
+      }
+      const body = {
+        year: State.year,
+        month: State.month,
+        monthly_min_needed: 0.0,
+        start_balance: null,
+        sundays_override: null
+      };
+      await API.post("/api/months", body);
+      await loadMonthsForYear(State.year);
+      await ensureSelectedMonthExists();
+      await refreshAll();
+      setToast("Месяц создан");
+    }
+
+    /**********************
+     * Data loading
+     **********************/
+    async function refreshAll(){
+      await loadCategories();
+      await loadYearAnalytics();
+      refreshSundayDates();
+      if (!State.monthId) {
+        // clear UI
+        renderEmptyMonth();
+        renderYearAnalytics();
+        updateDonationDateUI();
+        updateAttachmentControls();
+        renderDraftsCard();
+        return;
+      }
+      const [summary, services, expenses] = await Promise.all([
+        API.get(`/api/months/${State.monthId}/summary`),
+        API.get(`/api/months/${State.monthId}/services`),
+        API.get(`/api/months/${State.monthId}/expenses`)
+      ]);
+      State.summary = summary;
+      State.services = services.items || [];
+      State.expenses = expenses.items || [];
+      State.attachmentsByExpense.clear();
+      clearAttachmentBlobCache();
+
+      rebuildCategories();
+
+      updateDonationDateUI();
+
+      renderDashboard();
+      renderHistory();
+      updateWarningsExpenseForm();
+      updateAttachmentControls();
+      await loadDrafts();
+    }
+
+    function findDefaultSundayIndex(){
+      const today = new Date();
+      const todayISO = toIsoDateLocal(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
+      const idx = State.sundayDates.findLastIndex ? State.sundayDates.findLastIndex(d=>d<=todayISO) : (() => {
+        let last = -1;
+        for (let i=0;i<State.sundayDates.length;i++) if (State.sundayDates[i] <= todayISO) last = i;
+        return last;
+      })();
+      return (idx >= 0) ? idx : 0;
+    }
+
+    function renderEmptyMonth(){
+      $("#mIncome").textContent = "—";
+      $("#mExpenses").textContent = "—";
+      $("#mBalance").textContent = "—";
+      $("#mFactBalance").textContent = "—";
+      $("#mCompletion").textContent = "—";
+      $("#mMinNeeded").textContent = "—";
+      $("#mCollected").textContent = "—";
+      $("#mNeedMore").textContent = "—";
+      $("#mSDDR").textContent = "—";
+      $("#mPSDPM").textContent = "—";
+      $("#mnspsBadge").textContent = "—";
+      $("#expenseSum").textContent = "—";
+      $("#lastExpensesList").innerHTML = "";
+      $("#sundayBadges").innerHTML = "";
+
+      destroyCharts();
+    }
+
+    function destroyCharts(){
+      try { State.charts.sundayBar?.destroy(); } catch {}
+      try { State.charts.expensePie?.destroy(); } catch {}
+      try { State.charts.yearLine?.destroy(); } catch {}
+      try { State.charts.yearBalanceBar?.destroy(); } catch {}
+      State.charts.sundayBar = null;
+      State.charts.expensePie = null;
+      State.charts.yearLine = null;
+      State.charts.yearBalanceBar = null;
+    }
+
+    /**********************
+     * Rendering: Dashboard
+     **********************/
+    function renderDashboard(){
+      const s = State.summary;
+      renderYearAnalytics();
+      if (!s) return;
+
+      $("#mIncome").textContent = fmtMoney(s.month_income_sum);
+      $("#mExpenses").textContent = fmtMoney(s.month_expenses_sum);
+      $("#mBalance").textContent = fmtMoney(s.month_balance);
+      $("#mFactBalance").textContent = fmtMoney(s.fact_balance);
+
+      // ring
+      const pct = Math.round((Number(s.monthly_completion || 0) * 100) * 10) / 10;
+      $("#mCompletion").textContent = `${pct.toFixed(1)}%`;
+      const deg = clamp(Number(s.monthly_completion || 0), 0, 1) * 360;
+      $("#ring").style.background = `conic-gradient(var(--accent) ${deg}deg, rgba(255,255,255,.08) 0deg)`;
+
+      $("#mMinNeeded").textContent = fmtMoney(s.monthly_min_needed);
+      $("#mCollected").textContent = fmtMoney(s.month_income_sum);
+
+      const needMore = Math.max(0, Number(s.monthly_min_needed) - Number(s.month_income_sum));
+      $("#mNeedMore").textContent = (needMore > 0)
+        ? `Не хватает ${fmtMoney(needMore)} до МНСП`
+        : `МНСП выполнено 🎉`;
+
+      // badge
+      const badge = $("#mnspsBadge");
+      badge.classList.remove("ok","warn","bad");
+      if (Number(s.month_income_sum) >= Number(s.monthly_min_needed) && Number(s.monthly_min_needed) > 0){
+        badge.classList.add("ok");
+        badge.textContent = "МНСП: выполнено";
+      } else if (Number(s.monthly_min_needed) > 0 && Number(s.month_income_sum) > 0){
+        badge.classList.add("warn");
+        badge.textContent = "МНСП: в процессе";
+      } else {
+        badge.classList.add("bad");
+        badge.textContent = "МНСП: нет данных";
+      }
+
+      $("#mSDDR").textContent = (Number(s.sddr) > 0) ? fmtMoney(s.sddr) : "Нет суммы";
+      $("#mPSDPM").textContent = (typeof s.psdpm === "number") ? `${(s.psdpm*100).toFixed(1)}%` : "—";
+
+      renderSundayChart();
+      renderExpensePie();
+      renderLastExpenses();
+      updateAddButtonsByRole();
+    }
+
+    function renderYearAnalytics(){
+      const ya = State.yearAnalytics;
+      if (!ya || !ya.totals || !ya.months) {
+        renderYearEmpty();
+        return;
+      }
+
+      const totals = ya.totals;
+      const monthCount = totals.months_count || 0;
+
+      $("#yearMeta").textContent = `Год ${ya.year} • месяцев: ${monthCount} из 12 • сравнение с ${ya.prev_year?.year ?? "—"}`;
+      $("#yIncome").textContent = fmtMoney(totals.income);
+      $("#yExpenses").textContent = fmtMoney(totals.expenses);
+      $("#yBalance").textContent = fmtMoney(totals.balance);
+      $("#yYoY").textContent = fmtPercent(ya.yoy?.income, 1);
+
+      renderYearChips(ya.good_months || [], ya.bad_months || []);
+      const isExpanded = $("#yearCollection").classList.contains("expanded");
+      if (isExpanded) {
+        renderYearCharts(ya.months || []);
+      } else {
+        try { State.charts.yearLine?.destroy(); } catch {}
+        try { State.charts.yearBalanceBar?.destroy(); } catch {}
+        State.charts.yearLine = null;
+        State.charts.yearBalanceBar = null;
+      }
+    }
+
+    function renderYearEmpty(){
+      $("#yearMeta").textContent = "—";
+      $("#yIncome").textContent = "—";
+      $("#yExpenses").textContent = "—";
+      $("#yBalance").textContent = "—";
+      $("#yYoY").textContent = "—";
+      $("#goodMonths").innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      $("#badMonths").innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      try { State.charts.yearLine?.destroy(); } catch {}
+      try { State.charts.yearBalanceBar?.destroy(); } catch {}
+      State.charts.yearLine = null;
+      State.charts.yearBalanceBar = null;
+    }
+
+    function renderYearChips(good, bad){
+      const goodWrap = $("#goodMonths");
+      const badWrap = $("#badMonths");
+      goodWrap.innerHTML = "";
+      badWrap.innerHTML = "";
+
+      if (!good.length) {
+        goodWrap.innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      } else {
+        good.forEach((m)=>{
+          const chip = document.createElement("div");
+          chip.className = "chip ok";
+          chip.textContent = `${monthNameRu(m.month)} • ${fmtPercent(m.completion, 0)}`;
+          goodWrap.appendChild(chip);
+        });
+      }
+
+      if (!bad.length) {
+        badWrap.innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      } else {
+        bad.forEach((m)=>{
+          const chip = document.createElement("div");
+          chip.className = "chip bad";
+          chip.textContent = `${monthNameRu(m.month)} • ${fmtPercent(m.completion, 0)}`;
+          badWrap.appendChild(chip);
+        });
+      }
+    }
+
+    function renderYearCharts(months){
+      const labels = months.map((m)=> monthNameRu(m.month).slice(0,3));
+      const incomes = months.map((m)=> m.has_data ? Number(m.income || 0) : null);
+      const expenses = months.map((m)=> m.has_data ? Number(m.expenses || 0) : null);
+      const balances = months.map((m)=> m.has_data ? Number(m.balance || 0) : null);
+
+      const styles = getComputedStyle(document.documentElement);
+      const accent = styles.getPropertyValue("--accent").trim() || "#10b981";
+      const danger = styles.getPropertyValue("--danger").trim() || "#ef4444";
+      const muted = styles.getPropertyValue("--muted").trim();
+      const stroke = styles.getPropertyValue("--stroke").trim();
+
+      try { State.charts.yearLine?.destroy(); } catch {}
+      const lineCtx = $("#yearLine").getContext("2d");
+      State.charts.yearLine = new Chart(lineCtx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Доход",
+              data: incomes,
+              borderColor: accent,
+              backgroundColor: "rgba(16,185,129,.15)",
+              borderWidth: 2,
+              tension: 0.35,
+              spanGaps: true,
+            },
+            {
+              label: "Расход",
+              data: expenses,
+              borderColor: danger,
+              backgroundColor: "rgba(239,68,68,.15)",
+              borderWidth: 2,
+              tension: 0.35,
+              spanGaps: true,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 700 },
+          plugins: {
+            legend: {
+              display: true,
+              position: "bottom",
+              labels: { color: muted, boxWidth: 10, boxHeight: 10, padding: 12 }
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx)=> ` ${ctx.dataset.label}: ${fmtMoney(ctx.raw)}`
+              }
+            }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: muted } },
+            y: { beginAtZero: true, grid: { color: stroke }, ticks: { color: muted } }
+          }
+        }
+      });
+
+      const balanceColors = balances.map((v)=> (v ?? 0) >= 0 ? "rgba(16,185,129,.6)" : "rgba(239,68,68,.6)");
+      try { State.charts.yearBalanceBar?.destroy(); } catch {}
+      const barCtx = $("#yearBalanceBar").getContext("2d");
+      State.charts.yearBalanceBar = new Chart(barCtx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Баланс",
+              data: balances,
+              borderRadius: 10,
+              borderWidth: 0,
+              backgroundColor: balanceColors
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 700 },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx)=> ` ${fmtMoney(ctx.raw)}`
+              }
+            }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: muted } },
+            y: { grid: { color: stroke }, ticks: { color: muted } }
+          }
+        }
+      });
+    }
+
+    function updateAddButtonsByRole(){
+      const canEdit = (State.role === "admin" || State.role === "accountant");
+      $("#addSundayBtn").disabled = !canEdit;
+      $("#addSundayBtn").style.opacity = canEdit ? "1" : ".55";
+    }
+
+    function applyRoleUI(){
+      const canEdit = (State.role === "admin" || State.role === "accountant");
+      const isViewer = State.role === "viewer";
+      const addBtn = $(".navBtn[data-screen='add']");
+      if (addBtn) addBtn.style.display = canEdit ? "" : "none";
+      $("#navSettingsBtn").style.opacity = "1";
+      const navInner = $("#navInner");
+      if (navInner) navInner.classList.toggle("centered", isViewer);
+      $("#createMonthBtn").disabled = State.role !== "admin";
+      $("#createMonthBtn").style.opacity = (State.role === "admin") ? "1" : ".55";
+      updateAddButtonsByRole();
+      if (isViewer) {
+        $("#tabDonation").disabled = true;
+        $("#tabExpense").disabled = true;
+      }
+      updateAttachmentControls();
+      renderDraftsCard();
+    }
+
+    function updateAttachmentControls(){
+      const btn = $("#expAttachBtn");
+      const hint = $("#expAttachHint");
+      if (!btn || !hint) return;
+      const allowed = canEditAttachments();
+      btn.disabled = !allowed;
+      btn.style.opacity = allowed ? "1" : ".55";
+      hint.textContent = isMonthClosed()
+        ? "Месяц закрыт: загрузка и удаление недоступны."
+        : "Файлы загрузятся после сохранения расхода.";
+    }
+
+    function renderSundayChart(){
+      const sundays = State.sundayDates;
+      const servicesByDate = new Map(
+        State.services
+          .filter(s=> (s.income_type || "donation") === "donation")
+          .map(s=>[s.service_date, s])
+      );
+
+      const labels = sundays.map((d,i)=>String(i+1));
+      const data = sundays.map(d => {
+        const s = servicesByDate.get(d);
+        return s ? Number(s.total || 0) : 0;
+      });
+
+      // badges under chart
+      const badgeWrap = $("#sundayBadges");
+      badgeWrap.innerHTML = "";
+      sundays.forEach((d,i)=>{
+        const s = servicesByDate.get(d);
+        const weeklyMin = s ? Number(s.weekly_min_needed||0) : Number(State.summary?.weekly_min_needed||0);
+        const total = s ? Number(s.total||0) : 0;
+        const ok = weeklyMin ? (total > weeklyMin) : false;
+        const b = document.createElement("div");
+        b.className = "badge " + (ok ? "ok" : (total>0 ? "warn" : "bad"));
+        b.textContent = `${i+1}: ${ok ? "Собрана" : (total>0 ? "Не собрана" : "—")}`;
+        b.style.cursor = "pointer";
+        b.onclick = ()=> { switchScreen("add"); selectDonationSundayByDate(d); };
+        badgeWrap.appendChild(b);
+      });
+
+      // chart
+      try { State.charts.sundayBar?.destroy(); } catch {}
+      const ctx = $("#sundayBar").getContext("2d");
+      State.charts.sundayBar = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label: "Итого",
+            data,
+            borderWidth: 0,
+            borderRadius: 10,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 700 },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx)=> ` ${fmtMoney(ctx.raw)}`
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { color: getComputedStyle(document.documentElement).getPropertyValue("--muted").trim() }
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: getComputedStyle(document.documentElement).getPropertyValue("--stroke").trim() },
+              ticks: { color: getComputedStyle(document.documentElement).getPropertyValue("--muted").trim() }
+            }
+          }
+        }
+      });
+    }
+
+    function renderExpensePie(){
+      // group by category
+      const map = new Map();
+      for(const e of State.expenses){
+        const cat = e.category || "Прочее";
+        const v = Number(e.total||0);
+        map.set(cat, (map.get(cat)||0) + v);
+      }
+      const entries = Array.from(map.entries()).sort((a,b)=>b[1]-a[1]).slice(0, 10);
+      const labels = entries.map(x=>x[0]);
+      const data = entries.map(x=>Math.round(x[1]*100)/100);
+
+      $("#expenseSum").textContent = fmtMoney(State.summary?.month_expenses_sum ?? 0);
+
+      try { State.charts.expensePie?.destroy(); } catch {}
+      const ctx = $("#expensePie").getContext("2d");
+      State.charts.expensePie = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+          labels,
+          datasets: [{
+            data,
+            borderWidth: 0,
+            hoverOffset: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 700 },
+          plugins: {
+            legend: {
+              display: true,
+              position: "bottom",
+              labels: {
+                color: getComputedStyle(document.documentElement).getPropertyValue("--muted").trim(),
+                boxWidth: 10,
+                boxHeight: 10,
+                padding: 12
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx)=> ` ${ctx.label}: ${fmtMoney(ctx.raw)}`
+              }
+            }
+          },
+          cutout: "62%"
+        }
+      });
+    }
+
+    function renderLastExpenses(){
+      const list = $("#lastExpensesList");
+      list.innerHTML = "";
+      const last = [...State.expenses]
+        .sort((a,b)=> (b.expense_date||"").localeCompare(a.expense_date||"") || (b.id-a.id))
+        .slice(0, 5);
+
+      if (!last.length){
+        list.innerHTML = `<div class="tiny muted">Нет расходов</div>`;
+        return;
+      }
+
+      for(const e of last){
+        list.appendChild(makeExpenseItem(e, {compact:true}));
+      }
+    }
+
+    /**********************
+     * Rendering: History
+     **********************/
+    function rebuildHistoryMonthSelect(){
+      const sel = $("#histMonthSelect");
+      sel.innerHTML = "";
+      // if list empty, fallback to current month
+      let items = State.monthsList;
+      if (!items.length) items = [{id:null, year:State.year, month:State.month}];
+
+      for(const m of items){
+        const opt = document.createElement("option");
+        opt.value = m.id ? String(m.id) : "";
+        opt.textContent = `${monthNameRu(m.month)} ${m.year}${m.id ? "" : " (нет в базе)"}`;
+        sel.appendChild(opt);
+      }
+      // pick current if exists
+      const current = State.monthCache.get(keyYM(State.year, State.month));
+      if (current) sel.value = String(current.id);
+      else sel.value = "";
+    }
+
+    function rebuildCategories(){
+      const items = State.categoryItems || [];
+      const activeNames = items.filter(c=>Number(c.is_active||0) === 1).map(c=>c.name);
+      const extraNames = new Set((State.expenses || []).map(e=>e.category).filter(Boolean));
+      activeNames.forEach(name=>extraNames.delete(name));
+      const fallbackNames = Array.from(extraNames).sort((a,b)=>a.localeCompare(b,"ru"));
+      const allNames = items.map(c=>c.name).concat(fallbackNames.filter(n=>!items.find(c=>c.name===n)));
+      State.categories = allNames;
+
+      const selExp = $("#expCategory");
+      if (selExp){
+        selExp.innerHTML = "";
+        const opt0 = document.createElement("option");
+        opt0.value = "";
+        opt0.textContent = "— Выбрать категорию —";
+        selExp.appendChild(opt0);
+        const options = activeNames.length ? activeNames : allNames;
+        options.forEach(c=>{
+          const o = document.createElement("option");
+          o.value = c;
+          o.textContent = c;
+          selExp.appendChild(o);
+        });
+        if (!options.includes("Прочее")){
+          const o = document.createElement("option");
+          o.value = "Прочее";
+          o.textContent = "Прочее";
+          selExp.appendChild(o);
+        }
+        syncDropdown("expCategory");
+      }
+
+      // history category select
+      const sel = $("#histCategorySelect");
+      sel.innerHTML = "";
+      const opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = "Все категории";
+      sel.appendChild(opt0);
+      allNames.forEach(c=>{
+        const o = document.createElement("option");
+        o.value = c;
+        o.textContent = c;
+        sel.appendChild(o);
+      });
+      syncDropdown("histCategorySelect");
+    }
+
+    function renderHistory(){
+      const list = $("#histList");
+      list.innerHTML = "";
+
+      const monthId = $("#histMonthSelect").value ? Number($("#histMonthSelect").value) : null;
+
+      const q = ($("#histSearch").value || "").trim().toLowerCase();
+      const cat = ($("#histCategorySelect").value || "").trim();
+
+      let items = [];
+      if (State.historyMode === "don"){
+        items = (State.services || []).filter(s=> monthId ? (s.month_id === monthId) : (State.monthId ? s.month_id===State.monthId : true));
+      } else {
+        items = (State.expenses || []).filter(e=> monthId ? (e.month_id === monthId) : (State.monthId ? e.month_id===State.monthId : true));
+      }
+
+      if (State.historyMode === "exp" && cat) {
+        items = items.filter(e=>String(e.category||"") === cat);
+      }
+      if (q) {
+        items = items.filter(x=>{
+          const hay = State.historyMode === "don"
+            ? `${x.service_date} ${x.idx} ${x.mnsps_status} ${x.income_type || "donation"}`
+            : `${x.title||""} ${x.comment||""} ${x.category||""} ${x.expense_date||""}`;
+          return hay.toLowerCase().includes(q);
+        });
+      }
+
+      // sort
+      if (State.historyMode === "don") {
+        items.sort((a,b)=> (a.service_date||"").localeCompare(b.service_date||""));
+      } else {
+        items.sort((a,b)=> (b.expense_date||"").localeCompare(a.expense_date||"") || (b.id-a.id));
+      }
+
+      $("#histCatWrap").classList.toggle("hidden", State.historyMode !== "exp");
+
+      if (!items.length){
+        $("#histEmpty").classList.remove("hidden");
+        return;
+      }
+      $("#histEmpty").classList.add("hidden");
+
+      const canEdit = (State.role === "admin" || State.role === "accountant");
+      for(const it of items){
+        const node = (State.historyMode === "don")
+          ? makeDonationItem(it)
+          : makeExpenseItem(it);
+
+        // viewers can open details but cannot save/delete
+        node.dataset.canEdit = canEdit ? "1" : "0";
+        list.appendChild(node);
+      }
+    }
+
+    function makeDonationItem(s){
+      const total = Number(s.total||0);
+      const incomeType = (s.income_type || "donation");
+      const isDonation = incomeType === "donation";
+      const ok = (isDonation && s.weekly_min_needed && total > Number(s.weekly_min_needed));
+      const iconName = isDonation
+        ? (ok ? "volunteer_activism" : (total>0 ? "info" : "event_busy"))
+        : "paid";
+      const sub = isDonation
+        ? `${fmtLongDate(s.service_date)} • ${s.mnsps_status} • ПВС ${(Number(s.pvs_ratio||0)*100).toFixed(1)}%`
+        : `${fmtLongDate(s.service_date)} • Иной доход`;
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = `
+        <div class="itemLeft">
+          <div class="itemIco"><span class="icon">${iconName}</span></div>
+          <div class="itemText">
+            <div class="t">${isDonation ? `Воскресенье #${s.idx || "—"}` : "Иной доход"}</div>
+            <div class="s">${sub}</div>
+          </div>
+        </div>
+        <div class="itemRight">
+          <div class="amt mono">${fmtMoney(total)}</div>
+          <div class="dt">${fmtShortDate(s.service_date)}</div>
+        </div>
+      `;
+      div.onclick = ()=> openEditModal("service", s);
+      return div;
+    }
+
+    function makeExpenseItem(e, {compact=false}={}){
+      const total = Number(e.total||0);
+      const ico = e.is_system ? "percent" : "receipt_long";
+      const sub = compact
+        ? `${fmtLongDate(e.expense_date)} • ${e.category}`
+        : `${fmtLongDate(e.expense_date)} • ${e.category}${e.is_system ? " • системная" : ""}`;
+      const attachCount = Number(e.attachments_count || 0);
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = `
+        <div class="itemLeft">
+          <div class="itemIco"><span class="icon">${ico}</span></div>
+          <div class="itemText">
+            <div class="t">${escapeHtml(e.title || "Расход")}</div>
+            <div class="s">${escapeHtml(sub)}</div>
+          </div>
+        </div>
+        <div class="itemRight">
+          <div class="amtRow">
+            <div class="amt mono">${fmtMoney(total)}</div>
+            ${attachCount > 0 ? `<div class="attachCount"><span class="icon">attach_file</span>${attachCount}</div>` : ""}
+          </div>
+          <div class="dt">${fmtShortDate(e.expense_date)}</div>
+        </div>
+      `;
+      div.onclick = ()=> openEditModal("expense", e);
+      return div;
+    }
+
+       function escapeHtml(s){
+      return String(s||"").replace(/[&<>"']/g, (m)=>({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+      }[m]));
+    }
+
+    /**********************
+     * UI helpers: dropdowns
+     **********************/
+    const DropdownRegistry = new Map();
+
+    function initDropdownFromSelect(selectId, dropdownId){
+      const select = $(`#${selectId}`);
+      const dropdown = $(`#${dropdownId}`);
+      if (!select || !dropdown) return;
+
+      const panel = dropdown.querySelector(".dropdownPanel");
+      const trigger = dropdown.querySelector(".dropdownTrigger");
+      const valueEl = dropdown.querySelector(".dropdownValue");
+      if (!panel || !trigger || !valueEl) return;
+
+      let optionButtons = [];
+      const buildOptions = ()=>{
+        panel.innerHTML = "";
+        optionButtons = [];
+        Array.from(select.options).forEach((opt)=>{
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "dropdownOption";
+          btn.dataset.value = opt.value;
+          btn.textContent = opt.textContent;
+          btn.setAttribute("role", "option");
+          panel.appendChild(btn);
+          optionButtons.push(btn);
+        });
+      };
+      buildOptions();
+
+      const sync = ()=>{
+        buildOptions();
+        const selected = select.value || (select.options[0]?.value ?? "");
+        const opt = Array.from(select.options).find(o=>o.value === selected) || select.options[0];
+        if (opt) {
+          select.value = opt.value;
+          valueEl.textContent = opt.textContent;
+        } else {
+          valueEl.textContent = "—";
+        }
+        optionButtons.forEach(btn=>{
+          btn.setAttribute("aria-selected", btn.dataset.value === select.value ? "true" : "false");
+        });
+      };
+
+      const open = ()=>{
+        dropdown.classList.add("open");
+        trigger.setAttribute("aria-expanded", "true");
+      };
+      const close = ()=>{
+        dropdown.classList.remove("open");
+        trigger.setAttribute("aria-expanded", "false");
+      };
+
+      sync();
+      DropdownRegistry.set(selectId, sync);
+
+      trigger.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        dropdown.classList.contains("open") ? close() : open();
+      });
+      panel.addEventListener("click", (e)=>{
+        const btn = e.target.closest(".dropdownOption");
+        if (!btn) return;
+        select.value = btn.dataset.value;
+        select.dispatchEvent(new Event("change", {bubbles:true}));
+        close();
+      });
+      document.addEventListener("click", (e)=>{
+        if (!dropdown.contains(e.target)) close();
+      });
+      document.addEventListener("keydown", (e)=>{
+        if (e.key === "Escape") close();
+      });
+      select.addEventListener("change", sync);
+    }
+
+    function syncDropdown(selectId){
+      const sync = DropdownRegistry.get(selectId);
+      if (sync) sync();
+    }
+
+    /**********************
+     * Add: Donation form helpers
+     **********************/
+    function getDonationType(){
+      return ($("#donIncomeType").value || "donation").trim();
+    }
+
+    function setDonationTypeUI(){
+      const type = getDonationType();
+      syncDropdown("donIncomeType");
+      const isDonation = type === "donation";
+      $("#donSundayWrap").classList.toggle("hidden", !isDonation);
+      $("#donOtherDateWrap").classList.toggle("hidden", isDonation);
+      if (!isDonation && !$("#donOtherDate").value) {
+        $("#donOtherDate").value = State.otherIncomeDate || toIsoDateLocal(new Date());
+      }
+      updateDonationDateUI();
+    }
+
+    function selectDonationSundayByDate(dateIso){
+      const idx = State.sundayDates.indexOf(dateIso);
+      if (idx >= 0) {
+        State.sundayIndex = idx;
+        updateDonationDateUI();
+      }
+    }
+
+    function updateDonationDateUI(){
+      const type = getDonationType();
+      const isDonation = type === "donation";
+      let d = isDonation ? State.sundayDates[State.sundayIndex] : $("#donOtherDate").value;
+      if (!isDonation && !d) {
+        d = State.otherIncomeDate || toIsoDateLocal(new Date());
+        $("#donOtherDate").value = d;
+      }
+      if (isDonation) {
+        $("#sunDateLabel").textContent = d ? fmtLongDate(d) : "—";
+      }
+
+      // prefill from existing service
+      const svc = State.services.find(x=>x.service_date === d && (x.income_type || "donation") === type);
+      const cashless = svc ? Number(svc.cashless||0) : 0;
+      const cash = svc ? Number(svc.cash||0) : 0;
+      $("#donCashless").value = cashless ? String(cashless) : "";
+      $("#donCash").value = cash ? String(cash) : "";
+      recalcDonationTotals();
+    }
+
+    function recalcDonationTotals(){
+      const cashless = Number($("#donCashless").value||0);
+      const cash = Number($("#donCash").value||0);
+      const total = Math.round((cashless + cash) * 100)/100;
+      $("#donTotal").value = fmtMoney(total);
+
+      const type = getDonationType();
+      const isDonation = type === "donation";
+      const weeklyMin = isDonation ? Number(State.summary?.weekly_min_needed || 0) : 0;
+      $("#donWeeklyMin").textContent = weeklyMin ? fmtMoney(weeklyMin) : "—";
+
+      let status = "—";
+      let cls = "";
+      if (isDonation && weeklyMin > 0) {
+        if (total > weeklyMin) { status="Собрана"; cls="ok"; }
+        else { status="Не собрана"; cls=(total>0?"warn":"bad"); }
+        const pvs = total / weeklyMin;
+        $("#donPvs").textContent = `${(pvs*100).toFixed(1)}%`;
+      } else if (!isDonation) {
+        status = "Иной доход";
+        $("#donPvs").textContent = "—";
+      } else {
+        $("#donPvs").textContent = "—";
+      }
+
+      const b = $("#donStatus");
+      b.classList.remove("ok","warn","bad");
+      if (cls) b.classList.add(cls);
+      b.textContent = status;
+    }
+
+    async function copyPreviousSunday(){
+      if (getDonationType() !== "donation") return;
+      const idx = State.sundayIndex;
+      if (idx <= 0) return;
+      const prevDate = State.sundayDates[idx-1];
+      const prev = State.services.find(x=>x.service_date === prevDate && (x.income_type || "donation") === "donation");
+      if (!prev) return;
+      $("#donCashless").value = String(Number(prev.cashless||0));
+      $("#donCash").value = String(Number(prev.cash||0));
+      recalcDonationTotals();
+      setToast("Скопировано");
+    }
+
+    /**********************
+     * Add: Expense form helpers
+     **********************/
+    function setExpenseToday(){
+      const d = new Date();
+      const iso = toIsoDateLocal(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+      $("#expDate").value = iso;
+    }
+
+    function recalcExpenseTotals(){
+      const qty = Number($("#expQty").value||0);
+      const unit = Number($("#expUnit").value||0);
+      const total = Math.round(qty * unit * 100)/100;
+      $("#expTotal").value = fmtMoney(total);
+      updateWarningsExpenseForm();
+    }
+
+    function updateWarningsExpenseForm(){
+      const warn = $("#expWarn");
+      warn.classList.add("hidden");
+      if (!State.summary) return;
+
+      const total = Number($("#expQty").value||0) * Number($("#expUnit").value||0);
+      const fact = Number(State.summary.fact_balance||0);
+      const sddr = Number(State.summary.sddr||0);
+
+      // if expense > fact balance OR (sddr==0 and mnsp not completed) OR expense > sddr when sddr>0
+      const mnspCompleted = Number(State.summary.month_income_sum||0) >= Number(State.summary.monthly_min_needed||0) && Number(State.summary.monthly_min_needed||0) > 0;
+      const cond1 = total > fact && total > 0;
+      const cond2 = (!mnspCompleted && total > 0);
+      const cond3 = (sddr > 0 && total > sddr);
+
+      if (cond1 || cond2 || cond3) warn.classList.remove("hidden");
+    }
+    function resetExpenseForm(){
+      $("#expTitle").value = "";
+      $("#expUnit").value = "";
+      $("#expQty").value = "1";
+      $("#expComment").value = "";
+      State.pendingExpenseFiles = [];
+      $("#expAttachGrid").innerHTML = "";
+      $("#expAttachInput").value = "";
+      recalcExpenseTotals();
+    }
+
+    function applyTemplate(idxStr){
+      if (!idxStr) return;
+      const t = State.templates[Number(idxStr)];
+      if (!t) return;
+      $("#expTitle").value = t.title || "";
+      const catSelect = $("#expCategory");
+      const categoryValue = t.category || "";
+      if (catSelect){
+        if (categoryValue && !Array.from(catSelect.options).some(o=>o.value === categoryValue)){
+          const o = document.createElement("option");
+          o.value = categoryValue;
+          o.textContent = categoryValue;
+          catSelect.appendChild(o);
+        }
+        catSelect.value = categoryValue;
+        syncDropdown("expCategory");
+      }
+      $("#expUnit").value = String(Number(t.unit_amount||0));
+      $("#expQty").value = "1";
+      recalcExpenseTotals();
+    }
+
+    function setYearCollectionExpanded(expanded){
+      const card = $("#yearCollection");
+      const toggle = $("#yearCollectionToggle");
+      card.classList.toggle("expanded", expanded);
+      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      if (expanded) renderYearAnalytics();
+    }
+
+    /**********************
+     * Navigation + tabs
+     **********************/
+    function switchScreen(name){
+      const map = {
+        dashboard: $("#screenDashboard"),
+        add: $("#screenAdd"),
+        history: $("#screenHistory"),
+        settings: $("#screenSettings"),
+      };
+      for(const k in map){
+        map[k].classList.toggle("active", k === name);
+      }
+      // nav
+      $$(".navBtn").forEach(b=>b.classList.toggle("active", b.dataset.screen===name));
+      // hide sticky actions when not on add
+      // (they are inside add screen anyway)
+      if (name === "history") renderHistory();
+      if (name === "dashboard") renderDashboard();
+      if (name === "settings") renderSettingsUI();
+    }
+
+    function setAddTab(which){
+      const isDon = which === "don";
+      $("#tabDonation").classList.toggle("active", isDon);
+      $("#tabExpense").classList.toggle("active", !isDon);
+      $("#addDonationWrap").classList.toggle("hidden", !isDon);
+      $("#addExpenseWrap").classList.toggle("hidden", isDon);
+      if (isDon) setDonationTypeUI();
+    }
+
+    function setHistoryTab(which){
+      State.historyMode = which;
+      $("#tabHistDon").classList.toggle("active", which==="don");
+      $("#tabHistExp").classList.toggle("active", which==="exp");
+      renderHistory();
+    }
+
+    /**********************
+     * Edit modal
+     **********************/
+    const Edit = {
+      type: null, // "service"|"expense"
+      item: null
+    };
+
+    function openEditModal(type, item){
+      Edit.type = type;
+      Edit.item = JSON.parse(JSON.stringify(item)); // clone
+      const serviceType = (type === "service") ? (item.income_type || "donation") : null;
+      $("#editTitle").textContent = (type==="service")
+        ? (serviceType === "donation" ? "Пожертвование" : "Иной доход")
+        : "Расход";
+      $("#editHint").textContent = "";
+
+      // build form
+      const body = $("#editBody");
+      body.innerHTML = "";
+
+      const canEdit = (State.role === "admin" || State.role === "accountant");
+      const isSystem = (type==="expense" && Number(item.is_system||0) === 1);
+
+      // toggle buttons
+      $("#editSaveBtn").disabled = !canEdit || isSystem;
+      $("#editSaveBtn").style.opacity = (!canEdit || isSystem) ? ".55" : "1";
+      $("#editDeleteBtn").disabled = !canEdit || isSystem;
+      $("#editDeleteBtn").style.opacity = (!canEdit || isSystem) ? ".55" : "1";
+      $("#editDuplicateBtn").disabled = !canEdit;
+      $("#editDuplicateBtn").style.opacity = (!canEdit) ? ".55" : "1";
+      if (isSystem) $("#editHint").textContent = "Системная строка (десятина) редактируется автоматически.";
+
+      if (type==="service"){
+        body.appendChild(makeField("Дата", makeInput("date", item.service_date, {field:"service_date"})));
+        body.appendChild(makeField(
+          "Тип дохода",
+          makeSelect(
+            [
+              {value:"donation", label:"Пожертвование (10% Объединение)"},
+              {value:"other", label:"Иной доход (без 10%)"},
+            ],
+            item.income_type || "donation",
+            {field:"income_type"}
+          )
+        ));
+        body.appendChild(makeField("Безнал", makeInput("number", item.cashless, {step:"0.01", field:"cashless"})));
+        body.appendChild(makeField("Наличные", makeInput("number", item.cash, {step:"0.01", field:"cash"})));
+        const total = Number(item.cashless||0) + Number(item.cash||0);
+        body.appendChild(makeField("Итого", makeInput("text", fmtMoney(total), {readonly:true})));
+      } else {
+        body.appendChild(makeField("Дата", makeInput("date", item.expense_date)));
+        body.appendChild(makeField("Категория", makeInput("text", item.category)));
+        body.appendChild(makeField("Название", makeInput("text", item.title)));
+        body.appendChild(makeField("Количество", makeInput("number", item.qty, {step:"0.01"})));
+        body.appendChild(makeField("Сумма", makeInput("number", item.unit_amount, {step:"0.01"})));
+        const total = Number(item.qty||0) * Number(item.unit_amount||0);
+        body.appendChild(makeField("Итог", makeInput("text", fmtMoney(total), {readonly:true})));
+        body.appendChild(makeField("Комментарий", makeTextarea(item.comment||"")));
+        body.appendChild(buildEditAttachmentSection(item.id));
+      }
+
+      $("#editModal").classList.add("show");
+    }
+
+    function closeEditModal(){
+      $("#editModal").classList.remove("show");
+      Edit.type = null;
+      Edit.item = null;
+    }
+
+    function makeField(label, control){
+      const wrap = document.createElement("div");
+      wrap.className = "field";
+      const l = document.createElement("label");
+      l.textContent = label;
+      wrap.appendChild(l);
+      wrap.appendChild(control);
+      return wrap;
+    }
+    function makeInput(type, value, opts={}){
+      const i = document.createElement("input");
+      i.className = "input";
+      i.type = type;
+      if (value !== undefined && value !== null) i.value = String(value);
+      Object.assign(i, opts);
+      if (opts.field) i.dataset.field = opts.field;
+      return i;
+    }
+    function makeSelect(options, value, opts={}){
+      const s = document.createElement("select");
+      s.className = "input";
+      if (opts.field) s.dataset.field = opts.field;
+      options.forEach(opt=>{
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        s.appendChild(o);
+      });
+      if (value !== undefined && value !== null) s.value = String(value);
+      Object.assign(s, opts);
+      return s;
+    }
+    function makeTextarea(value){
+      const t = document.createElement("textarea");
+      t.className = "input";
+      t.rows = 3;
+      t.value = String(value||"");
+      return t;
+    }
+
+    function buildEditAttachmentSection(expenseId){
+      const wrap = document.createElement("div");
+      wrap.className = "field";
+      const header = document.createElement("div");
+      header.className = "rowBetween";
+      const title = document.createElement("div");
+      title.className = "bold";
+      title.textContent = "Чек/скан";
+      header.appendChild(title);
+
+      const grid = document.createElement("div");
+      grid.className = "attachmentGrid";
+      const hint = document.createElement("div");
+      hint.className = "tiny muted2 attachHint";
+
+      if (canEditAttachments()){
+        const btn = document.createElement("button");
+        btn.className = "btn small";
+        btn.type = "button";
+        btn.innerHTML = `<span class="icon">photo_camera</span> Добавить`;
+        const input = document.createElement("input");
+        input.type = "file";
+        input.multiple = true;
+        input.accept = ATTACHMENT_ACCEPT;
+        input.className = "hidden";
+        btn.addEventListener("click", ()=> input.click());
+        input.addEventListener("change", async ()=>{
+          const files = Array.from(input.files || []);
+          input.value = "";
+          await uploadExpenseAttachments(expenseId, files, grid);
+          await refreshAll();
+        });
+        header.appendChild(btn);
+        wrap.appendChild(input);
+        hint.textContent = "Тапните по миниатюре для просмотра.";
+      } else {
+        hint.textContent = "Только просмотр.";
+      }
+
+      wrap.appendChild(header);
+      wrap.appendChild(grid);
+      wrap.appendChild(hint);
+      fetchExpenseAttachments(expenseId)
+        .then((items)=> renderAttachmentGrid(grid, items, expenseId, {showEmpty:true}))
+        .catch(()=> renderAttachmentGrid(grid, [], expenseId, {showEmpty:true}));
+      return wrap;
+    }
+
+    async function saveEdit(){
+      if (!Edit.type || !Edit.item) return;
+      const canEdit = (State.role === "admin" || State.role === "accountant");
+      if (!canEdit) return;
+
+      if (Edit.type === "service"){
+        const dateI = $("#editBody .input[data-field='service_date']");
+        const typeI = $("#editBody .input[data-field='income_type']");
+        const cashlessI = $("#editBody .input[data-field='cashless']");
+        const cashI = $("#editBody .input[data-field='cash']");
+        const body = {
+          service_date: dateI.value,
+          cashless: Number(cashlessI.value||0),
+          cash: Number(cashI.value||0),
+          income_type: (typeI?.value || "donation")
+        };
+        await API.put(`/api/services/${Edit.item.id}`, body);
+        closeEditModal();
+        setToast("Сохранено");
+        await refreshAll();
+        return;
+      }
+
+      // expense
+      if (Number(Edit.item.is_system||0) === 1) return;
+      const controls = $$("#editBody .input");
+      const [dateI, catI, titleI, qtyI, unitI, totalI, commentI] = controls;
+      const body = {
+        expense_date: dateI.value,
+        category: catI.value.trim() || "Прочее",
+        title: titleI.value.trim() || "Расход",
+        qty: Number(qtyI.value||1),
+        unit_amount: Number(unitI.value||0),
+        comment: (commentI.value||"").trim() || null
+      };
+      await API.put(`/api/expenses/${Edit.item.id}`, body);
+      closeEditModal();
+      setToast("Сохранено");
+      await refreshAll();
+    }
+
+    async function deleteEdit(){
+      if (!Edit.type || !Edit.item) return;
+      const canEdit = (State.role === "admin" || State.role === "accountant");
+      if (!canEdit) return;
+
+      if (Edit.type === "service"){
+        await API.del(`/api/services/${Edit.item.id}`);
+        closeEditModal();
+        setToast("Удалено");
+        await refreshAll();
+        return;
+      }
+
+      if (Number(Edit.item.is_system||0) === 1) return;
+      await API.del(`/api/expenses/${Edit.item.id}`);
+      closeEditModal();
+      setToast("Удалено");
+      await refreshAll();
+    }
+
+    async function duplicateEdit(){
+      if (!Edit.type || !Edit.item) return;
+      const canEdit = (State.role === "admin" || State.role === "accountant");
+      if (!canEdit) return;
+
+      if (!State.monthId) return;
+
+      if (Edit.type === "service"){
+        // Duplicate to same date (noop) doesn't make sense; instead copy values into add form
+        switchScreen("add");
+        setAddTab("don");
+        $("#donIncomeType").value = (Edit.item.income_type || "donation");
+        setDonationTypeUI();
+        if ((Edit.item.income_type || "donation") === "donation") {
+          selectDonationSundayByDate(Edit.item.service_date);
+        } else {
+          $("#donOtherDate").value = Edit.item.service_date;
+          State.otherIncomeDate = Edit.item.service_date;
+          updateDonationDateUI();
+        }
+        $("#donCashless").value = String(Number(Edit.item.cashless||0));
+        $("#donCash").value = String(Number(Edit.item.cash||0));
+        recalcDonationTotals();
+        closeEditModal();
+        setToast("Скопировано в форму");
+        return;
+      }
+
+      // expense duplicate: create new expense with same fields + today date
+      const d = new Date();
+      const todayIso = toIsoDateLocal(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+      const body = {
+        expense_date: todayIso,
+        category: Edit.item.category || "Прочее",
+        title: Edit.item.title || "Расход",
+        qty: Number(Edit.item.qty||1),
+        unit_amount: Number(Edit.item.unit_amount||0),
+        comment: Edit.item.comment || null
+      };
+      await API.post(`/api/months/${State.monthId}/expenses`, body);
+      closeEditModal();
+      setToast("Дублировано");
+      await refreshAll();
+    }
+
+    /**********************
+     * Settings UI
+     **********************/
+    const CategoryModal = { mode: "create", id: null };
+    const MergeState = { targetId: null, sourceIds: new Set() };
+
+    function openCategoryNameModal({mode="create", category=null}={}){
+      CategoryModal.mode = mode;
+      CategoryModal.id = category ? category.id : null;
+      $("#categoryNameTitle").textContent = mode === "rename" ? "Переименовать категорию" : "Новая категория";
+      $("#categoryNameInput").value = category?.name || "";
+      $("#categoryNameModal").classList.add("show");
+      $("#categoryNameInput").focus();
+    }
+    function closeCategoryNameModal(){
+      $("#categoryNameModal").classList.remove("show");
+    }
+
+    function buildAliasChip(alias){
+      const chip = document.createElement("div");
+      chip.className = "aliasChip";
+      chip.innerHTML = `
+        <span>${escapeHtml(alias.alias || "")}</span>
+        <button type="button" aria-label="Удалить алиас"><span class="icon">close</span></button>
+      `;
+      const btn = chip.querySelector("button");
+      btn.addEventListener("click", async (e)=>{
+        e.stopPropagation();
+        const ok = confirm("Удалить алиас?");
+        if (!ok) return;
+        try{
+          await API.del(`/api/category-aliases/${alias.id}`);
+          await loadCategories();
+          setToast("Алиас удалён");
+        }catch(err){
+          alert(String(err.message || err));
+        }
+      });
+      return chip;
+    }
+
+    function renderCategoriesSection(){
+      const section = $("#categoriesSection");
+      if (!section) return;
+      const isAdmin = State.role === "admin";
+      section.classList.toggle("hidden", !isAdmin);
+      if (!isAdmin) return;
+
+      const list = $("#categoriesList");
+      const empty = $("#categoriesEmpty");
+      list.innerHTML = "";
+      const items = State.categoryItems || [];
+      empty.classList.toggle("hidden", items.length > 0);
+
+      items.forEach((item)=>{
+        const card = document.createElement("div");
+        card.className = "card bigCard collectionCard categoryCard";
+        const active = Number(item.is_active || 0) === 1;
+        const badgeClass = active ? "ok" : "bad";
+        const badgeText = active ? "Активна" : "Неактивна";
+        const aliasCount = item.aliases ? item.aliases.length : 0;
+        card.innerHTML = `
+          <div class="categoryHeader">
+            <button class="collectionToggle" type="button">
+              <div class="categoryMeta">
+                <div class="bold">${escapeHtml(item.name)}</div>
+                <div class="categoryCount">Расходов: ${Number(item.expense_count || 0)}</div>
+              </div>
+              <span class="icon collectionChevron">expand_more</span>
+            </button>
+            <div class="categoryActions">
+              <button class="badge ${badgeClass} categoryStatusBtn" type="button">${badgeText}</button>
+              <button class="btn small categoryRenameBtn" type="button">Переименовать</button>
+              <button class="btn small categoryMergeBtn" type="button">Объединить</button>
+              <button class="btn small categoryAliasesBtn" type="button">Алиасы (${aliasCount})</button>
+            </div>
+          </div>
+          <div class="collectionBody">
+            <div class="aliasList"></div>
+            <div class="row" style="gap:8px; flex-wrap:wrap;">
+              <input class="input aliasInput" type="text" placeholder="Новый алиас" />
+              <button class="btn small aliasAddBtn" type="button"><span class="icon">add</span> Добавить</button>
+            </div>
+          </div>
+        `;
+
+        const toggleBtn = card.querySelector(".collectionToggle");
+        toggleBtn.addEventListener("click", ()=> card.classList.toggle("expanded"));
+        const aliasesBtn = card.querySelector(".categoryAliasesBtn");
+        aliasesBtn.addEventListener("click", ()=> card.classList.toggle("expanded"));
+
+        const aliasList = card.querySelector(".aliasList");
+        (item.aliases || []).forEach(alias=> aliasList.appendChild(buildAliasChip(alias)));
+
+        card.querySelector(".aliasAddBtn").addEventListener("click", async ()=>{
+          const input = card.querySelector(".aliasInput");
+          const alias = (input.value || "").trim();
+          if (!alias) return;
+          try{
+            await API.post(`/api/categories/${item.id}/aliases`, {alias});
+            input.value = "";
+            await loadCategories();
+            setToast("Алиас добавлен");
+          }catch(err){
+            alert(String(err.message || err));
+          }
+        });
+
+        card.querySelector(".categoryRenameBtn").addEventListener("click", ()=>{
+          openCategoryNameModal({mode:"rename", category:item});
+        });
+        card.querySelector(".categoryMergeBtn").addEventListener("click", ()=>{
+          openCategoryMergeModal(item.id);
+        });
+        card.querySelector(".categoryStatusBtn").addEventListener("click", async ()=>{
+          try{
+            await API.put(`/api/categories/${item.id}`, {is_active: !active});
+            await loadCategories();
+            setToast("Статус обновлён");
+          }catch(err){
+            alert(String(err.message || err));
+          }
+        });
+
+        list.appendChild(card);
+      });
+    }
+
+    function openCategoryMergeModal(targetId){
+      const items = State.categoryItems || [];
+      if (!items.length) return;
+      MergeState.targetId = targetId || items[0]?.id || null;
+      MergeState.sourceIds = new Set();
+
+      const targetSelect = $("#mergeTargetSelect");
+      targetSelect.innerHTML = "";
+      items.forEach((item)=>{
+        const opt = document.createElement("option");
+        opt.value = String(item.id);
+        opt.textContent = item.name;
+        targetSelect.appendChild(opt);
+      });
+      if (MergeState.targetId) targetSelect.value = String(MergeState.targetId);
+
+      function buildSources(){
+        const sourceWrap = $("#mergeSources");
+        sourceWrap.innerHTML = "";
+        const targetIdVal = Number(targetSelect.value);
+        items.filter(item=>item.id !== targetIdVal).forEach((item)=>{
+          const chip = document.createElement("div");
+          chip.className = "chip";
+          chip.textContent = item.name;
+          chip.dataset.id = String(item.id);
+          chip.addEventListener("click", ()=>{
+            const id = Number(item.id);
+            if (MergeState.sourceIds.has(id)){
+              MergeState.sourceIds.delete(id);
+              chip.classList.remove("selected");
+            }else{
+              MergeState.sourceIds.add(id);
+              chip.classList.add("selected");
+            }
+            $("#mergeConfirmBtn").disabled = MergeState.sourceIds.size === 0;
+          });
+          sourceWrap.appendChild(chip);
+        });
+        $("#mergeConfirmBtn").disabled = true;
+      }
+
+      buildSources();
+      targetSelect.onchange = ()=>{
+        MergeState.sourceIds = new Set();
+        buildSources();
+      };
+
+      $("#categoryMergeModal").classList.add("show");
+    }
+
+    function closeCategoryMergeModal(){
+      $("#categoryMergeModal").classList.remove("show");
+    }
+
+    async function renderSettingsUI(){
+      const canSee = (State.role === "admin" || State.role === "accountant" || State.role === "viewer");
+      $("#settingsDenied").classList.toggle("hidden", canSee);
+      $("#settingsWrap").classList.toggle("hidden", !canSee);
+
+      // accountant: show only local templates section (MVP) + exports
+      const isAdmin = State.role === "admin";
+      const isViewer = State.role === "viewer";
+      const isAccountant = State.role === "accountant";
+      // hide admin-only blocks
+      $$(".section", $("#screenSettings")).forEach(sec=>{
+        // default show; we'll hide specific controls inside
+      });
+
+      $("#reportsSection").classList.toggle("hidden", !isAdmin);
+      $("#monthSection").classList.toggle("hidden", !isAdmin);
+      $("#templatesSection").classList.toggle("hidden", !(isAdmin || isAccountant));
+      $("#exportSection").classList.toggle("hidden", !(isAdmin || isAccountant));
+      $("#usersSection").classList.toggle("hidden", !isAdmin);
+      $("#themeSection").classList.toggle("hidden", !(isAdmin || isViewer));
+      $("#categoriesSection").classList.toggle("hidden", !isAdmin);
+
+      // Admin-only controls
+      const adminOnlyIds = [
+        "setChatId","setSundayTime","setDailyTime","setDailyEnabled","saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn","sendTestReportBtn",
+        "setMonthlyMin","setSundaysOverride","setStartBalance","setTimezone","saveMonthSettingsBtn"
+      ];
+      adminOnlyIds.forEach(id=>{
+        const el = $("#"+id);
+        if (el) el.closest(".field")?.classList.toggle("hidden", !isAdmin);
+      });
+      // Admin-only buttons in reports block
+      ["saveSettingsBtn","sendSundayNowBtn","sendExpensesNowBtn","sendTestReportBtn","saveMonthSettingsBtn"].forEach(id=>{
+        const el = $("#"+id);
+        if (el) el.classList.toggle("hidden", !isAdmin);
+      });
+      const themeBtn = $("#saveThemeBtn");
+      if (themeBtn) themeBtn.classList.toggle("hidden", !(isAdmin || isViewer));
+
+      // Load server settings for admin/viewer
+      if (isAdmin || isViewer){
+        const s = await API.get("/api/settings");
+        if (isAdmin) {
+          $("#setChatId").value = (s.report_chat_id ?? "");
+          $("#setSundayTime").value = (s.sunday_report_time || "18:00");
+          $("#setDailyTime").value = (s.month_report_time || "21:00");
+          $("#setDailyEnabled").value = s.daily_expenses_enabled ? "1" : "0";
+          $("#setTimezone").value = (s.timezone || "Europe/Warsaw");
+        }
+        $("#setTheme").value = (s.ui_theme || "auto");
+      }
+
+      // Month settings (current month)
+      if (isAdmin && State.monthId){
+        const m = State.monthCache.get(keyYM(State.year, State.month));
+        if (m){
+          $("#setMonthlyMin").value = (m.monthly_min_needed ?? "");
+          $("#setSundaysOverride").value = (m.sundays_override ?? "");
+          $("#setStartBalance").value = (m.start_balance ?? "");
+        }
+      }
+
+      // Templates editor
+      $("#templatesJson").value = JSON.stringify(State.templates, null, 2);
+
+      renderCategoriesSection();
+    }
+
+    async function loadThemeSetting(){
+      const s = await API.get("/api/settings");
+      applyTheme(s.ui_theme || "auto");
+      const themeSelect = $("#setTheme");
+      if (themeSelect) themeSelect.value = (s.ui_theme || "auto");
+    }
+
+    /**********************
+     * Actions: Save donation/expense
+     **********************/
+    async function saveDonation({andNext=false}={}){
+      if (!State.monthId) {
+        alert("Месяц не создан. Попросите админа создать месяц.");
+        return;
+      }
+      if (!(State.role === "admin" || State.role === "accountant")) {
+        alert("У вашей роли нет прав на изменение данных.");
+        return;
+      }
+      const type = getDonationType();
+      const isDonation = type === "donation";
+      const d = isDonation ? State.sundayDates[State.sundayIndex] : $("#donOtherDate").value;
+      if (!d) return;
+
+      const cashless = Number($("#donCashless").value||0);
+      const cash = Number($("#donCash").value||0);
+
+      await API.post(`/api/months/${State.monthId}/services`, {
+        service_date: d,
+        cashless,
+        cash,
+        income_type: type
+      });
+      setToast("Сохранено");
+      await refreshAll();
+
+      if (andNext){
+        if (isDonation) {
+          State.sundayIndex = clamp(State.sundayIndex+1, 0, State.sundayDates.length-1);
+          updateDonationDateUI();
+        }
+      }
+    }
+
+    async function saveExpense({andMore=false}={}){
+      if (!State.monthId) {
+        alert("Месяц не создан. Попросите админа создать месяц.");
+        return;
+      }
+      if (!(State.role === "admin" || State.role === "accountant")) {
+        alert("У вашей роли нет прав на изменение данных.");
+        return;
+      }
+
+      const date = $("#expDate").value;
+      const category = ($("#expCategory").value||"").trim() || "Прочее";
+      const title = ($("#expTitle").value||"").trim() || "Расход";
+      const qty = Number($("#expQty").value||1);
+      const unit = Number($("#expUnit").value||0);
+      const comment = ($("#expComment").value||"").trim() || null;
+
+      // Warning: if shown, require confirm
+      if (!$("#expWarn").classList.contains("hidden")){
+        const ok = confirm("Расход может превышать доступный баланс/СДДР. Сохранить всё равно?");
+        if (!ok) return;
+      }
+
+      const created = await API.post(`/api/months/${State.monthId}/expenses`, {
+        expense_date: date,
+        category,
+        title,
+        qty,
+        unit_amount: unit,
+        comment
+      });
+      const expenseId = created?.id;
+      if (expenseId && State.pendingExpenseFiles.length){
+        await uploadExpenseAttachments(expenseId, State.pendingExpenseFiles, $("#expAttachGrid"));
+        State.pendingExpenseFiles = [];
+        $("#expAttachInput").value = "";
+      }
+
+      setToast("Сохранено");
+      await refreshAll();
+
+      if (andMore){
+        resetExpenseForm();
+      }
+    }
+
+    /**********************
+     * Exports
+     **********************/
+    function openDownload(url){
+      // In Telegram in-app browser, this opens the file
+      window.open(url, "_blank");
+    }
+
+    /**********************
+     * Month picker modal
+     **********************/
+    function openMonthModal(){
+      // year select: current year +- 2
+      const ySel = $("#yearSelect");
+      const mSel = $("#monthSelect");
+      ySel.innerHTML = "";
+      mSel.innerHTML = "";
+
+      const now = new Date();
+      const y0 = now.getFullYear();
+      const years = [y0-1, y0, y0+1, y0+2];
+      years.forEach(y=>{
+        const o = document.createElement("option");
+        o.value = String(y);
+        o.textContent = String(y);
+        ySel.appendChild(o);
+      });
+
+      for(let m=1;m<=12;m++){
+        const o = document.createElement("option");
+        o.value = String(m);
+        o.textContent = monthNameRu(m);
+        mSel.appendChild(o);
+      }
+      ySel.value = String(State.year);
+      mSel.value = String(State.month);
+
+      $("#monthModal").classList.add("show");
+    }
+    function closeMonthModal(){
+      $("#monthModal").classList.remove("show");
+    }
+
+    async function applyMonthSelection(){
+      const y = Number($("#yearSelect").value);
+      const m = Number($("#monthSelect").value);
+      State.year = y;
+      State.month = m;
+      setMonthTitle();
+      await loadMonthsForYear(State.year);
+      await ensureSelectedMonthExists();
+      await refreshAll();
+      closeMonthModal();
+    }
+
+    /**********************
+     * Bottom nav mount
+     **********************/
+    const nav = document.createElement("div");
+    nav.className = "nav";
+    nav.innerHTML = `
+      <div class="navInner" id="navInner">
+        <button class="navBtn active" data-screen="dashboard" type="button">
+          <span class="icon">dashboard</span><span class="lbl">Дашборд</span>
+        </button>
+        <button class="navBtn" data-screen="add" type="button">
+          <span class="icon">add_circle</span><span class="lbl">Добавить</span>
+        </button>
+        <button class="navBtn" data-screen="history" type="button">
+          <span class="icon">history</span><span class="lbl">История</span>
+        </button>
+        <button class="navBtn" data-screen="settings" type="button" id="navSettingsBtn">
+          <span class="icon">settings</span><span class="lbl">Настройки</span>
+        </button>
+      </div>
+    `;
+    document.body.appendChild(nav);
+
+    /**********************
+     * Event wiring
+     **********************/
+    function wireEvents(){
+      // nav
+      $$(".navBtn").forEach(btn=>{
+        btn.addEventListener("click", ()=>{
+          const screen = btn.dataset.screen;
+          if (screen === "add" && !(State.role === "admin" || State.role === "accountant")){
+            switchScreen("dashboard");
+            setToast("Нет доступа");
+            return;
+          }
+          switchScreen(screen);
+        });
+      });
+
+      // topbar
+      $("#refreshBtn").addEventListener("click", async ()=>{
+        try{
+          await refreshAll();
+          setToast("Обновлено");
+        }catch(e){ alert(String(e.message||e)); }
+      });
+      $("#monthBtn").addEventListener("click", openMonthModal);
+
+      // month modal
+      $("#closeMonthModal").addEventListener("click", closeMonthModal);
+      $("#monthModal").addEventListener("click", (e)=>{ if (e.target === $("#monthModal")) closeMonthModal(); });
+      $("#applyMonthBtn").addEventListener("click", async ()=>{
+        try{ await applyMonthSelection(); } catch(e){ alert(String(e.message||e)); }
+      });
+
+      // dashboard quick actions
+      $("#addSundayBtn").addEventListener("click", ()=>{
+        switchScreen("add");
+        setAddTab("don");
+      });
+      $("#allExpensesBtn").addEventListener("click", ()=>{
+        switchScreen("history");
+        setHistoryTab("exp");
+      });
+      $("#createMonthBtn").addEventListener("click", async ()=>{
+        try{ await createMonthIfAdmin(); } catch(e){ alert(String(e.message||e)); }
+      });
+      $("#yearCollectionToggle").addEventListener("click", ()=>{
+        const isExpanded = $("#yearCollection").classList.contains("expanded");
+        setYearCollectionExpanded(!isExpanded);
+      });
+
+      // add tabs
+      $("#tabDonation").addEventListener("click", ()=> setAddTab("don"));
+      $("#tabExpense").addEventListener("click", ()=> setAddTab("exp"));
+
+      // donation sunday arrows
+      $("#sunPrev").addEventListener("click", ()=>{
+        State.sundayIndex = clamp(State.sundayIndex-1, 0, State.sundayDates.length-1);
+        updateDonationDateUI();
+      });
+      $("#sunNext").addEventListener("click", ()=>{
+        State.sundayIndex = clamp(State.sundayIndex+1, 0, State.sundayDates.length-1);
+        updateDonationDateUI();
+      });
+
+      // donation recalc
+      $("#donCashless").addEventListener("input", recalcDonationTotals);
+      $("#donCash").addEventListener("input", recalcDonationTotals);
+      $("#donIncomeType").addEventListener("change", setDonationTypeUI);
+      $("#donOtherDate").addEventListener("change", ()=>{
+        State.otherIncomeDate = $("#donOtherDate").value;
+        updateDonationDateUI();
+      });
+
+      // donation chips (active field = focused input)
+      let activeDonField = $("#donCashless");
+      $("#donCashless").addEventListener("focus", ()=>activeDonField=$("#donCashless"));
+      $("#donCash").addEventListener("focus", ()=>activeDonField=$("#donCash"));
+
+      $("#donChips").addEventListener("click", (e)=>{
+        const chip = e.target.closest(".chip");
+        if (!chip) return;
+        if (chip.id === "copyPrevSunday") { copyPreviousSunday(); return; }
+        const add = Number(chip.dataset.add||0);
+        if (!add) return;
+        const cur = Number(activeDonField.value||0);
+        activeDonField.value = String(Math.round((cur+add)*100)/100);
+        recalcDonationTotals();
+      });
+
+      // donation save
+      $("#saveDonationBtn").addEventListener("click", async ()=>{
+        try{ await saveDonation({andNext:false}); }catch(e){ alert(String(e.message||e)); }
+      });
+      $("#saveDonationNextBtn").addEventListener("click", async ()=>{
+        try{ await saveDonation({andNext:true}); }catch(e){ alert(String(e.message||e)); }
+      });
+
+      // expense form
+      $("#expQty").addEventListener("input", recalcExpenseTotals);
+      $("#expUnit").addEventListener("input", recalcExpenseTotals);
+      $("#expTemplate").addEventListener("change", (e)=> applyTemplate(e.target.value));
+      $("#expAttachBtn").addEventListener("click", ()=>{
+        if (!canEditAttachments()) return;
+        $("#expAttachInput").click();
+      });
+      $("#expAttachInput").addEventListener("change", (e)=>{
+        addPendingExpenseFiles(e.target.files);
+        e.target.value = "";
+      });
+
+      $("#saveExpenseBtn").addEventListener("click", async ()=>{
+        try{ await saveExpense({andMore:false}); }catch(e){ alert(String(e.message||e)); }
+      });
+      $("#saveExpenseMoreBtn").addEventListener("click", async ()=>{
+        try{ await saveExpense({andMore:true}); }catch(e){ alert(String(e.message||e)); }
+      });
+      $("#saveExpenseDraftBtn").addEventListener("click", async ()=>{
+        try{ await saveExpenseDraft(); }catch(e){ alert(String(e.message||e)); }
+      });
+
+      $("#openDraftsBtn").addEventListener("click", openDraftsModal);
+      $("#closeDraftsModal").addEventListener("click", closeDraftsModal);
+      $("#draftsModal").addEventListener("click", (e)=>{ if (e.target === $("#draftsModal")) closeDraftsModal(); });
+
+      // history tabs + filters
+      $("#tabHistDon").addEventListener("click", ()=> setHistoryTab("don"));
+      $("#tabHistExp").addEventListener("click", ()=> setHistoryTab("exp"));
+      $("#histMonthSelect").addEventListener("change", renderHistory);
+      $("#histCategorySelect").addEventListener("change", renderHistory);
+      $("#histSearch").addEventListener("input", ()=> {
+        // small debounce
+        clearTimeout(window.__histT);
+        window.__histT = setTimeout(renderHistory, 120);
+      });
+
+      // edit modal
+      $("#closeEditModal").addEventListener("click", closeEditModal);
+      $("#editModal").addEventListener("click", (e)=>{ if (e.target === $("#editModal")) closeEditModal(); });
+      $("#editSaveBtn").addEventListener("click", async ()=>{
+        try{ await saveEdit(); } catch(e){ alert(String(e.message||e)); }
+      });
+      $("#editDeleteBtn").addEventListener("click", async ()=>{
+        try{
+          const ok = confirm("Удалить запись?");
+          if (!ok) return;
+          await deleteEdit();
+        } catch(e){ alert(String(e.message||e)); }
+      });
+      $("#editDuplicateBtn").addEventListener("click", async ()=>{
+        try{ await duplicateEdit(); } catch(e){ alert(String(e.message||e)); }
+      });
+      // viewer modal
+      $("#closeViewerModal").addEventListener("click", closeViewerModal);
+      $("#viewerModal").addEventListener("click", (e)=>{ if (e.target === $("#viewerModal")) closeViewerModal(); });
+      $("#viewerDeleteBtn").addEventListener("click", async ()=>{
+        if (!Viewer.attachment || !Viewer.expenseId) return;
+        try{
+          const grid = $("#editBody .attachmentGrid");
+          const deleted = await deleteAttachment(Viewer.attachment, Viewer.expenseId, grid);
+          if (deleted) closeViewerModal();
+        }catch(e){ alert(String(e.message||e)); }
+      });
+
+      // settings
+      $("#saveSettingsBtn").addEventListener("click", async ()=>{
+        try{
+          await API.put("/api/settings", {
+            report_chat_id: $("#setChatId").value ? Number($("#setChatId").value) : null,
+            sunday_report_time: $("#setSundayTime").value || null,
+            month_report_time: $("#setDailyTime").value || null,
+            daily_expenses_enabled: ($("#setDailyEnabled").value === "1")
+          });
+          setToast("Сохранено");
+        } catch(e){ alert(String(e.message||e)); }
+      });
+
+      $("#saveThemeBtn").addEventListener("click", async ()=>{
+        try{
+          const theme = ($("#setTheme").value || "auto");
+          await API.put("/api/settings", { ui_theme: theme });
+          applyTheme(theme);
+          setToast("Тема сохранена");
+        } catch(e){ alert(String(e.message||e)); }
+      });
+
+      // categories (admin)
+      $("#addCategoryBtn").addEventListener("click", ()=> openCategoryNameModal({mode:"create"}));
+      $("#closeCategoryNameModal").addEventListener("click", closeCategoryNameModal);
+      $("#closeCategoryMergeModal").addEventListener("click", closeCategoryMergeModal);
+      $("#categoryNameModal").addEventListener("click", (e)=>{ if (e.target === $("#categoryNameModal")) closeCategoryNameModal(); });
+      $("#categoryMergeModal").addEventListener("click", (e)=>{ if (e.target === $("#categoryMergeModal")) closeCategoryMergeModal(); });
+      $("#saveCategoryNameBtn").addEventListener("click", async ()=>{
+        const name = ($("#categoryNameInput").value || "").trim();
+        if (!name) return;
+        try{
+          if (CategoryModal.mode === "rename" && CategoryModal.id){
+            await API.put(`/api/categories/${CategoryModal.id}`, {name});
+            setToast("Категория обновлена");
+          }else{
+            await API.post("/api/categories", {name});
+            setToast("Категория создана");
+          }
+          closeCategoryNameModal();
+          await loadCategories();
+        }catch(err){
+          alert(String(err.message || err));
+        }
+      });
+      $("#mergeConfirmBtn").addEventListener("click", async ()=>{
+        const targetId = Number($("#mergeTargetSelect").value || 0);
+        const sourceIds = Array.from(MergeState.sourceIds || []);
+        if (!targetId || sourceIds.length === 0) return;
+        const ok = confirm("Операция изменит историю. Продолжить?");
+        if (!ok) return;
+        try{
+          await API.post("/api/categories/merge", {target_id: targetId, source_ids: sourceIds});
+          closeCategoryMergeModal();
+          await refreshAll();
+          setToast("Категории объединены");
+        }catch(err){
+          alert(String(err.message || err));
+        }
+      });
+
+      $("#sendSundayNowBtn").addEventListener("click", async ()=>{
+        try{ await API.post("/api/reports/sunday", {}); setToast("Отправлено"); } catch(e){ alert(String(e.message||e)); }
+      });
+      $("#sendExpensesNowBtn").addEventListener("click", async ()=>{
+        try{ await API.post("/api/reports/month_expenses", {}); setToast("Отправлено"); } catch(e){ alert(String(e.message||e)); }
+      });
+      $("#sendTestReportBtn").addEventListener("click", async ()=>{
+        try{ await API.post("/api/reports/test", {}); setToast("Тест отправлен"); } catch(e){ alert(String(e.message||e)); }
+      });
+
+      $("#saveMonthSettingsBtn").addEventListener("click", async ()=>{
+        try{
+          if (!State.monthId) { alert("Месяц не создан."); return; }
+          await API.put(`/api/months/${State.monthId}`, {
+            monthly_min_needed: $("#setMonthlyMin").value ? Number($("#setMonthlyMin").value) : null,
+            start_balance: $("#setStartBalance").value ? Number($("#setStartBalance").value) : null,
+            sundays_override: $("#setSundaysOverride").value ? Number($("#setSundaysOverride").value) : null
+          });
+          // also timezone global if changed
+          const tz = ($("#setTimezone").value||"").trim();
+          if (tz) await API.put("/api/settings", { timezone: tz });
+          await loadMonthsForYear(State.year);
+          await refreshAll();
+          setToast("Сохранено");
+        } catch(e){ alert(String(e.message||e)); }
+      });
+
+      $("#saveTemplatesBtn").addEventListener("click", ()=>{
+        try{
+          const v = $("#templatesJson").value;
+          const arr = JSON.parse(v);
+          if (!Array.isArray(arr)) throw new Error("Ожидается массив объектов");
+          State.templates = arr;
+          saveTemplatesToStorage();
+          rebuildTemplateSelect();
+          setToast("Сохранено");
+        } catch(e){
+          alert("Ошибка в JSON шаблонов: " + String(e.message||e));
+        }
+      });
+
+      $("#exportCsvBtn").addEventListener("click", ()=>{
+        if (!State.monthId){ alert("Месяц не выбран/не создан."); return; }
+        openDownload(`${API.baseUrl}/api/export/csv?month_id=${encodeURIComponent(State.monthId)}`);
+      });
+      $("#exportXlsxBtn").addEventListener("click", ()=>{
+        openDownload(`${API.baseUrl}/api/export/excel?year=${encodeURIComponent(State.year)}`);
+      });
+    }
+
+    /**********************
+     * Boot
+     **********************/
+    async function boot(){
+      applyTheme("auto");
+      // load templates early
+      loadTemplates();
+      rebuildTemplateSelect();
+
+      // init dates
+      const t = todayYMD();
+      State.year = t.y;
+      State.month = t.m;
+      setMonthTitle();
+      State.otherIncomeDate = `${t.y}-${String(t.m).padStart(2,"0")}-${String(t.d).padStart(2,"0")}`;
+
+      wireEvents();
+      initDropdownFromSelect("donIncomeType", "donIncomeTypeDropdown");
+      initDropdownFromSelect("expCategory", "expCategoryDropdown");
+      initDropdownFromSelect("expTemplate", "expTemplateDropdown");
+      initDropdownFromSelect("histCategorySelect", "histCategoryDropdown");
+      setDonationTypeUI();
+
+
+      // Hide settings tab label for viewer (still present but gated)
+      // We'll keep it visible but will block opening.
+
+      try{
+        await API.ensureAuth();
+      }catch(e){
+        alert("Авторизация не удалась: " + String(e.message||e));
+        return;
+      }
+
+      State.role = API.user?.role || "viewer";
+      const displayName = (API.user?.name || "").trim();
+      $("#roleBadge").textContent = `роль: ${displayName || State.role}`;
+      applyRoleUI();
+
+      try {
+        await loadThemeSetting();
+      } catch (e) {
+        applyTheme("auto");
+      }
+
+      await loadMonthsForYear(State.year);
+      await ensureSelectedMonthExists();
+      setMonthTitle();
+
+      // prefill expense date + totals
+      setExpenseToday();
+      recalcExpenseTotals();
+
+      // build month selection lists for modal
+      await refreshAll();
+
+      // initial render settings UI (lazy)
+      renderSettingsUI();
+
+      const initialScreen = new URLSearchParams(window.location.search).get("screen");
+      if (["dashboard","add","history","settings"].includes(initialScreen)){
+        if (initialScreen === "add" && !(State.role === "admin" || State.role === "accountant")) {
+          setToast("Нет доступа");
+        } else {
+          switchScreen(initialScreen);
+          if (initialScreen === "add") setAddTab("don");
+        }
+      }
+    }
+
+    boot().catch(e=> alert(String(e.message||e)));
+  </script>
+</body>
+</html>
