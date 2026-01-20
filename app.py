@@ -1,4 +1,3 @@
-
 # app.py
 # FastAPI API + планировщик отчётов + aiogram bot (единое приложение)
 # По ТЗ: SQLite, allowlist (users.json), роли, Telegram WebApp auth (initData), расчёты как Excel.
@@ -226,6 +225,7 @@ def init_db() -> None:
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+        );
         """
     )
     # drafts
@@ -2972,3 +2972,4 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
+
