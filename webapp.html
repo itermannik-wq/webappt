@@ -2990,6 +2990,18 @@
       return false;
     }
 
+    async function loadLatestMonthFallback(){
+      const data = await API.get("/api/months/latest");
+      if (!data?.item) return false;
+      State.year = data.item.year;
+      State.month = data.item.month;
+      await loadMonthsForYear(State.year);
+      await ensureSelectedMonthExists();
+      setMonthTitle();
+      return Boolean(State.monthId);
+    }
+
+
     function refreshSundayDates(){
       State.sundayDates = computeSundays(State.year, State.month);
       if (State.sundayDates.length === 0) {
@@ -3013,7 +3025,10 @@
       };
       await API.post("/api/months", body);
       await loadMonthsForYear(State.year);
-      await ensureSelectedMonthExists();
+      const hasMonth = await ensureSelectedMonthExists();
+      if (!hasMonth) {
+        await loadLatestMonthFallback();
+      }
       await refreshAll();
       setToast("Месяц создан");
     }
