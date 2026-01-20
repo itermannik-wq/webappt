@@ -1,3 +1,4 @@
+
 # app.py
 # FastAPI API + планировщик отчётов + aiogram bot (единое приложение)
 # По ТЗ: SQLite, allowlist (users.json), роли, Telegram WebApp auth (initData), расчёты как Excel.
@@ -22,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import (
     BackgroundTasks,
+    Body,
     Depends,
     FastAPI,
     File,
@@ -224,8 +226,27 @@ def init_db() -> None:
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+        """
+    )
+    # drafts
+    db_exec(
+        """
+        CREATE TABLE IF NOT EXISTS drafts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            month_id INTEGER NOT NULL,
+            created_by_user_id INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE CASCADE
         );
         """
+    )
+    db_exec(
+        "CREATE INDEX IF NOT EXISTS idx_drafts_month_user ON drafts(month_id, created_by_user_id, status);"
     )
     # settings (single row is fine)
     db_exec(
@@ -342,10 +363,76 @@ def ensure_month_open(month_id: int) -> None:
         raise HTTPException(status_code=403, detail="Month is closed")
 
 
+def normalize_expense_draft_payload(raw: Dict[str, Any], tz: ZoneInfo) -> Dict[str, Any]:
+    today = dt.datetime.now(tz=tz).date()
+    raw_date = raw.get("expense_date")
+    if isinstance(raw_date, dt.date):
+        expense_date = raw_date.isoformat()
+    elif raw_date:
+        try:
+            expense_date = dt.date.fromisoformat(str(raw_date)).isoformat()
+        except ValueError:
+            expense_date = today.isoformat()
+    else:
+        expense_date = today.isoformat()
+
+    def normalize_float(value: Any, default: float) -> float:
+        if value in (None, "", "null"):
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    qty = normalize_float(raw.get("qty"), 1.0)
+    unit_amount = normalize_float(raw.get("unit_amount"), 0.0)
+    category = str(raw.get("category") or "").strip() or "Прочее"
+    title = str(raw.get("title") or "").strip() or "Расход"
+    comment = raw.get("comment")
+    if comment is not None:
+        comment = str(comment).strip()
+        if not comment:
+            comment = None
+    tags = raw.get("tags")
+    if tags is not None and not isinstance(tags, list):
+        tags = [str(tags)]
+
+    payload = {
+        "expense_date": expense_date,
+        "category": category,
+        "title": title,
+        "qty": qty,
+        "unit_amount": unit_amount,
+        "comment": comment,
+    }
+    if tags is not None:
+        payload["tags"] = tags
+    return payload
+
+
+def draft_payload_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    qty = float(payload.get("qty") or 0)
+    unit_amount = float(payload.get("unit_amount") or 0)
+    total = round(qty * unit_amount, 2)
+    return {
+        "title": payload.get("title"),
+        "category": payload.get("category"),
+        "expense_date": payload.get("expense_date"),
+        "total": total,
+    }
+
+
 def get_expense_or_404(expense_id: int) -> sqlite3.Row:
     row = db_fetchone("SELECT * FROM expenses WHERE id=?;", (expense_id,))
     if not row:
         raise HTTPException(status_code=404, detail="Expense not found")
+    return row
+
+
+def get_draft_or_404(draft_id: int) -> sqlite3.Row:
+    row = db_fetchone("SELECT * FROM drafts WHERE id=?;", (draft_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="Draft not found")
     return row
 
 
@@ -2309,6 +2396,168 @@ def delete_expense(
     log_audit(int(u["id"]), "DELETE", "expense", expense_id, dict(before), None)
 
     ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    return {"ok": True}
+
+
+# ---------------------------
+# Drafts
+# ---------------------------
+
+@APP.post("/api/months/{month_id}/drafts/expenses")
+def create_expense_draft(
+        month_id: int,
+        body: Dict[str, Any] = Body(...),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+    payload = normalize_expense_draft_payload(body, tz)
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO drafts (
+            kind, month_id, created_by_user_id, payload_json, status, created_at, updated_at
+        ) VALUES ('expense', ?, ?, ?, 'draft', ?, ?);
+        """,
+        (
+            month_id,
+            int(u["id"]),
+            json.dumps(payload, ensure_ascii=False),
+            now,
+            now,
+        ),
+    )
+    after = db_fetchone("SELECT * FROM drafts WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "draft", new_id, None, dict(after) if after else None)
+    return {"id": new_id}
+
+
+@APP.put("/api/drafts/{draft_id}")
+def update_draft(
+        draft_id: int,
+        body: Dict[str, Any] = Body(...),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    existing = get_draft_or_404(draft_id)
+    if existing["status"] != "draft":
+        raise HTTPException(status_code=409, detail="Draft is not editable")
+    if u["role"] != "admin" and int(existing["created_by_user_id"]) != int(u["id"]):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+    payload = normalize_expense_draft_payload(body, tz)
+    db_exec(
+        "UPDATE drafts SET payload_json=?, updated_at=? WHERE id=?;",
+        (json.dumps(payload, ensure_ascii=False), now, draft_id),
+    )
+    after = db_fetchone("SELECT * FROM drafts WHERE id=?;", (draft_id,))
+    log_audit(int(u["id"]), "UPDATE", "draft", draft_id, dict(existing), dict(after) if after else None)
+    return {"ok": True}
+
+
+@APP.get("/api/months/{month_id}/drafts")
+def list_drafts(
+        month_id: int,
+        kind: str = Query("expense"),
+        scope: str = Query("mine"),
+        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    if kind != "expense":
+        raise HTTPException(status_code=400, detail="Unsupported draft kind")
+    if scope not in ("mine", "all"):
+        raise HTTPException(status_code=400, detail="Invalid scope")
+    if scope == "all" and u["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Insufficient role for scope=all")
+
+    params: List[Any] = [month_id, kind, "draft"]
+    sql = """
+            SELECT *
+            FROM drafts
+            WHERE month_id=? AND kind=? AND status=?
+        """
+    if scope == "mine":
+        sql += " AND created_by_user_id=?"
+        params.append(int(u["id"]))
+    sql += " ORDER BY updated_at DESC, id DESC;"
+
+    rows = db_fetchall(sql, tuple(params))
+    items: List[Dict[str, Any]] = []
+    for r in rows:
+        item = dict(r)
+        payload = json.loads(r["payload_json"])
+        item["payload"] = payload
+        item["summary"] = draft_payload_summary(payload)
+        items.append(item)
+    return {"items": items}
+
+
+@APP.post("/api/drafts/{draft_id}/submit")
+def submit_draft(
+        draft_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    draft = get_draft_or_404(draft_id)
+    if draft["status"] != "draft":
+        raise HTTPException(status_code=409, detail="Draft is not submittable")
+    if u["role"] != "admin" and int(draft["created_by_user_id"]) != int(u["id"]):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    month_id = int(draft["month_id"])
+    if is_month_closed(month_id):
+        raise HTTPException(status_code=409, detail="Month is closed")
+
+    tz = CFG.tzinfo()
+    now = iso_now(tz)
+    payload = normalize_expense_draft_payload(json.loads(draft["payload_json"]), tz)
+    total = round(float(payload["qty"]) * float(payload["unit_amount"]), 2)
+
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO expenses (
+            month_id, expense_date, category, title, qty, unit_amount, total, comment,
+            is_system, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?);
+        """,
+        (
+            month_id,
+            payload["expense_date"],
+            payload["category"],
+            payload["title"],
+            float(payload["qty"]),
+            float(payload["unit_amount"]),
+            total,
+            payload.get("comment"),
+            now,
+            now,
+        ),
+    )
+    after = db_fetchone("SELECT * FROM expenses WHERE id=?;", (new_id,))
+    log_audit(int(u["id"]), "CREATE", "expense", new_id, None, dict(after) if after else None)
+
+    db_exec(
+        "UPDATE drafts SET status='submitted', updated_at=? WHERE id=?;",
+        (now, draft_id),
+    )
+    log_audit(int(u["id"]), "SUBMIT", "draft", draft_id, dict(draft), None)
+
+    ensure_tithe_expense(month_id, user_id=int(u["id"]))
+    return {"expense_id": new_id}
+
+
+@APP.delete("/api/drafts/{draft_id}")
+def delete_draft(
+        draft_id: int,
+        u: sqlite3.Row = Depends(require_role("admin", "accountant")),
+):
+    draft = get_draft_or_404(draft_id)
+    if draft["status"] != "draft":
+        raise HTTPException(status_code=409, detail="Draft cannot be deleted")
+    if u["role"] != "admin" and int(draft["created_by_user_id"]) != int(u["id"]):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    now = iso_now(CFG.tzinfo())
+    db_exec("UPDATE drafts SET status='deleted', updated_at=? WHERE id=?;", (now, draft_id))
+    log_audit(int(u["id"]), "DELETE", "draft", draft_id, dict(draft), None)
     return {"ok": True}
 
 
