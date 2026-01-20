@@ -2997,19 +2997,7 @@
       State.month = data.item.month;
       await loadMonthsForYear(State.year);
       await ensureSelectedMonthExists();
-      setMonthTitle();
-      return Boolean(State.monthId);
-    }
-
-
-    async function loadLatestMonthFallback(){
-      const data = await API.get("/api/months/latest");
-      if (!data?.item) return false;
-      State.year = data.item.year;
-      State.month = data.item.month;
-      await loadMonthsForYear(State.year);
-      const hasMonth = await ensureSelectedMonthExists();
-      if (!hasMonth) {
+      if (!State.monthId) {
         await loadLatestMonthFallback();
       }
       setMonthTitle();
@@ -5130,6 +5118,9 @@
       setMonthTitle();
       await loadMonthsForYear(State.year);
       await ensureSelectedMonthExists();
+      if (!State.monthId) {
+        await loadLatestMonthFallback();
+      }
       await refreshAll();
       closeMonthModal();
     }
@@ -5378,6 +5369,8 @@
           await API.put("/api/settings", { ui_theme: theme });
           applyTheme(theme);
           setToast("Тема сохранена");
+        } catch(e){ alert(String(e.message||e)); }
+      });
       $("#budgetAddRowBtn").addEventListener("click", ()=>{
         const table = $("#budgetTable");
         table.appendChild(buildBudgetRowForm());
