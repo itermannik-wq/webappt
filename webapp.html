@@ -361,6 +361,28 @@
     .bigCard{
       padding: 14px;
     }
+    .miniCard{
+      padding: 12px 14px;
+    }
+    .draftsCardBtn{
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: inherit;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      padding: 0;
+      cursor: pointer;
+    }
+    .draftCount{
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(16,185,129,.14);
+      border: 1px solid rgba(16,185,129,.28);
+      font-size: 12px;
+    }
     .row{
       display:flex;
       align-items:center;
@@ -843,6 +865,10 @@
       max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bot));
     }
     @keyframes sheetUp{ to{ transform: translateY(0); } }
+    .modalBackdrop.draftModal .modal{
+      animation: sheetUp220 .22s ease forwards;
+    }
+    @keyframes sheetUp220{ to{ transform: translateY(0); } }
     .modalHeader{
       padding: 12px 14px;
       display:flex;
@@ -914,6 +940,55 @@
     .spacer8{ height: 8px; }
     .spacer12{ height: 12px; }
     .right{ text-align:right; }
+
+    .draftList{
+      display:flex;
+      flex-direction:column;
+      gap: 12px;
+    }
+    .draftItem{
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 16px;
+      padding: 12px;
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+      transition: height .18s ease, opacity .18s ease, margin .18s ease, padding .18s ease;
+      overflow: hidden;
+    }
+    .draftItem.removing{
+      opacity: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      margin-top: 0;
+      margin-bottom: 0;
+    }
+    .draftMain{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 10px;
+    }
+    .draftTitle{
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+    .draftMeta{
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .draftAmount{
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .draftActions{
+      display:flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
 
     /* Small screens */
     @media (max-width: 360px){
@@ -1239,6 +1314,15 @@
 
       <!-- Expense form -->
       <div id="addExpenseWrap" class="hidden">
+        <div id="draftsCard" class="card miniCard hidden">
+          <button id="openDraftsBtn" class="draftsCardBtn" type="button">
+            <div class="row">
+              <span class="icon">draft</span>
+              <span class="bold">Черновики</span>
+            </div>
+            <span id="draftsCount" class="draftCount">0</span>
+          </button>
+        </div>
         <div class="card bigCard">
           <div class="form">
             <div class="field">
@@ -1325,6 +1409,9 @@
             </button>
             <button id="saveExpenseMoreBtn" class="btn ghost" type="button">
               Сохранить и добавить ещё
+            </button>
+            <button id="saveExpenseDraftBtn" class="btn ghost" type="button">
+              В черновик
             </button>
           </div>
         </div>
@@ -1532,6 +1619,19 @@
           </button>
           <div class="tiny muted2">Если месяца нет в базе — создайте его (роль admin).</div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drafts modal -->
+  <div id="draftsModal" class="modalBackdrop draftModal">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Черновики</div>
+        <button id="closeDraftsModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div id="draftsList" class="draftList"></div>
       </div>
     </div>
   </div>
@@ -1820,6 +1920,7 @@
       categories: [],
       attachmentsByExpense: new Map(),
       pendingExpenseFiles: [],
+      drafts: [],
     };
 
     /**********************
@@ -2083,6 +2184,200 @@
     }
 
     /**********************
+     * Drafts
+     **********************/
+    function canSeeDrafts(){
+      return State.role === "admin" || State.role === "accountant";
+    }
+    async function loadDrafts(){
+      if (!State.monthId || !canSeeDrafts()){
+        State.drafts = [];
+        renderDraftsCard();
+        return;
+      }
+      const scope = (State.role === "admin") ? "all" : "mine";
+      try{
+        const data = await API.get(`/api/months/${State.monthId}/drafts?kind=expense&scope=${scope}`);
+        State.drafts = data.items || [];
+      }catch(e){
+        State.drafts = [];
+      }
+      renderDraftsCard();
+    }
+    function renderDraftsCard(){
+      const card = $("#draftsCard");
+      if (!card) return;
+      if (!canSeeDrafts() || !State.monthId){
+        card.classList.add("hidden");
+        return;
+      }
+      card.classList.remove("hidden");
+      $("#draftsCount").textContent = String(State.drafts.length || 0);
+    }
+    function openDraftsModal(){
+      if (!canSeeDrafts()) return;
+      renderDraftsList();
+      $("#draftsModal").classList.add("show");
+    }
+    function closeDraftsModal(){
+      $("#draftsModal").classList.remove("show");
+    }
+    function ensureExpenseCategoryOption(category){
+      if (!category) return;
+      const sel = $("#expCategory");
+      const exists = Array.from(sel.options).some((opt)=> opt.value === category);
+      if (!exists){
+        const o = document.createElement("option");
+        o.value = category;
+        o.textContent = category;
+        sel.appendChild(o);
+      }
+    }
+    function applyDraftToForm(draft){
+      const payload = draft.payload || {};
+      const date = payload.expense_date || toIsoDateLocal(new Date());
+      const category = payload.category || "Прочее";
+      const title = payload.title || "Расход";
+      const qty = payload.qty ?? 1;
+      const unit = payload.unit_amount ?? 0;
+      const comment = payload.comment || "";
+
+      switchScreen("add");
+      setAddTab("exp");
+      $("#expDate").value = date;
+      ensureExpenseCategoryOption(category);
+      $("#expCategory").value = category;
+      syncDropdown("expCategory");
+      $("#expTitle").value = title;
+      $("#expQty").value = String(qty);
+      $("#expUnit").value = String(unit);
+      $("#expComment").value = comment;
+      recalcExpenseTotals();
+      updateWarningsExpenseForm();
+      closeDraftsModal();
+    }
+    function buildDraftPayloadFromForm(){
+      const date = $("#expDate").value || toIsoDateLocal(new Date());
+      const qtyRaw = $("#expQty").value;
+      const unitRaw = $("#expUnit").value;
+      const qty = (qtyRaw === "" || qtyRaw === null) ? 1 : Number(qtyRaw || 1);
+      const unit_amount = (unitRaw === "" || unitRaw === null) ? 0 : Number(unitRaw || 0);
+      const category = ($("#expCategory").value || "").trim() || "Прочее";
+      const title = ($("#expTitle").value || "").trim() || "Расход";
+      const commentRaw = ($("#expComment").value || "").trim();
+      const comment = commentRaw ? commentRaw : null;
+      return { expense_date: date, category, title, qty, unit_amount, comment };
+    }
+    function renderDraftsList(){
+      const list = $("#draftsList");
+      list.innerHTML = "";
+      if (!State.drafts.length){
+        list.innerHTML = `<div class="tiny muted">Нет черновиков</div>`;
+        return;
+      }
+      State.drafts.forEach((draft)=>{
+        const payload = draft.payload || {};
+        const summary = draft.summary || {};
+        const title = summary.title || payload.title || "Расход";
+        const category = summary.category || payload.category || "Прочее";
+        const expenseDate = summary.expense_date || payload.expense_date || "";
+        const total = summary.total ?? (Number(payload.qty || 0) * Number(payload.unit_amount || 0));
+
+        const item = document.createElement("div");
+        item.className = "draftItem";
+
+        const main = document.createElement("div");
+        main.className = "draftMain";
+
+        const left = document.createElement("div");
+        left.innerHTML = `
+          <div class="draftTitle">${escapeHtml(title)}</div>
+          <div class="draftMeta">${escapeHtml(category)}${expenseDate ? ` • ${fmtShortDate(expenseDate)}` : ""}</div>
+        `;
+
+        const right = document.createElement("div");
+        right.className = "draftAmount";
+        right.textContent = fmtMoney(total);
+
+        main.appendChild(left);
+        main.appendChild(right);
+
+        const actions = document.createElement("div");
+        actions.className = "draftActions";
+
+        const openBtn = document.createElement("button");
+        openBtn.className = "btn small";
+        openBtn.type = "button";
+        openBtn.textContent = "Открыть";
+        openBtn.addEventListener("click", ()=> applyDraftToForm(draft));
+
+        const submitBtn = document.createElement("button");
+        submitBtn.className = "btn primary small";
+        submitBtn.type = "button";
+        submitBtn.textContent = "Провести";
+        submitBtn.addEventListener("click", async ()=>{
+          try{
+            await API.post(`/api/drafts/${draft.id}/submit`, {});
+            setToast("Проведено");
+            await refreshAll();
+            await loadDrafts();
+            renderDraftsList();
+          }catch(e){
+            alert(String(e.message || e));
+          }
+        });
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "btn small";
+        deleteBtn.type = "button";
+        deleteBtn.textContent = "Удалить";
+        deleteBtn.addEventListener("click", async ()=>{
+          const ok = confirm("Удалить черновик?");
+          if (!ok) return;
+          try{
+            await API.del(`/api/drafts/${draft.id}`);
+            const height = item.offsetHeight;
+            item.style.height = `${height}px`;
+            requestAnimationFrame(()=>{
+              item.classList.add("removing");
+              item.style.height = "0px";
+            });
+            State.drafts = State.drafts.filter((d)=> d.id !== draft.id);
+            renderDraftsCard();
+            setTimeout(()=>{
+              renderDraftsList();
+            }, 200);
+            setToast("Удалено");
+          }catch(e){
+            alert(String(e.message || e));
+          }
+        });
+
+        actions.appendChild(openBtn);
+        actions.appendChild(submitBtn);
+        actions.appendChild(deleteBtn);
+
+        item.appendChild(main);
+        item.appendChild(actions);
+        list.appendChild(item);
+      });
+    }
+    async function saveExpenseDraft(){
+      if (!State.monthId) {
+        alert("Месяц не создан. Попросите админа создать месяц.");
+        return;
+      }
+      if (!canSeeDrafts()){
+        alert("У вашей роли нет прав на изменение данных.");
+        return;
+      }
+      const payload = buildDraftPayloadFromForm();
+      await API.post(`/api/months/${State.monthId}/drafts/expenses`, payload);
+      setToast("Черновик сохранён");
+      await loadDrafts();
+    }
+
+    /**********************
      * Templates (local)
      **********************/
     function defaultTemplates(){
@@ -2225,6 +2520,7 @@
         renderYearAnalytics();
         updateDonationDateUI();
         updateAttachmentControls();
+        renderDraftsCard();
         return;
       }
       const [summary, services, expenses] = await Promise.all([
@@ -2250,6 +2546,7 @@
       renderHistory();
       updateWarningsExpenseForm();
       updateAttachmentControls();
+      await loadDrafts();
     }
 
     function findDefaultSundayIndex(){
@@ -2535,6 +2832,7 @@
         $("#tabExpense").disabled = true;
       }
       updateAttachmentControls();
+      renderDraftsCard();
     }
 
     function updateAttachmentControls(){
@@ -3771,6 +4069,13 @@
       $("#saveExpenseMoreBtn").addEventListener("click", async ()=>{
         try{ await saveExpense({andMore:true}); }catch(e){ alert(String(e.message||e)); }
       });
+      $("#saveExpenseDraftBtn").addEventListener("click", async ()=>{
+        try{ await saveExpenseDraft(); }catch(e){ alert(String(e.message||e)); }
+      });
+
+      $("#openDraftsBtn").addEventListener("click", openDraftsModal);
+      $("#closeDraftsModal").addEventListener("click", closeDraftsModal);
+      $("#draftsModal").addEventListener("click", (e)=>{ if (e.target === $("#draftsModal")) closeDraftsModal(); });
 
       // history tabs + filters
       $("#tabHistDon").addEventListener("click", ()=> setHistoryTab("don"));
