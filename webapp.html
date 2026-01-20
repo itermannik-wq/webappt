@@ -342,6 +342,75 @@
     .collectionCard.expanded .collectionChevron{
       transform: rotate(180deg);
     }
+    .categoryCard .collectionToggle{
+      gap: 10px;
+      flex-wrap: wrap;
+      width: auto;
+      flex: 1;
+    }
+    .categoryHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    .categoryMeta{
+      display:flex;
+      flex-direction:column;
+      gap: 4px;
+      min-width: 0;
+    }
+    .categoryActions{
+      display:flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items:center;
+      justify-content:flex-end;
+    }
+    .categoryCount{
+      font-size: 12px;
+      color: var(--muted2);
+    }
+    .aliasList{
+      display:flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .aliasChip{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--card2);
+      border: 1px solid var(--stroke);
+      font-size: 12px;
+      animation: chipPop .14s ease;
+    }
+    .aliasChip button{
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      display:grid;
+      place-items:center;
+    }
+    .aliasChip .icon{
+      font-size: 16px;
+    }
+    @keyframes chipPop{
+      from{ transform: scale(.92); opacity: .5; }
+      to{ transform: scale(1); opacity: 1; }
+    }
+    .chip.selected{
+      color: rgba(16,185,129,.95);
+      border-color: rgba(16,185,129,.35);
+      background: rgba(16,185,129,.12);
+    }
     .metric{
       padding: 12px 12px 10px;
       min-height: 82px;
@@ -459,6 +528,12 @@
       background: linear-gradient(180deg, rgba(16,185,129,.95), rgba(16,185,129,.75));
       border-color: rgba(16,185,129,.35);
       color: #062216;
+      font-weight: 750;
+    }
+    .btn.danger{
+      background: linear-gradient(180deg, rgba(239,68,68,.95), rgba(239,68,68,.75));
+      border-color: rgba(239,68,68,.35);
+      color: #fff;
       font-weight: 750;
     }
     .btn.ghost{
@@ -1581,6 +1656,17 @@
           </div>
         </div>
 
+        <div class="section" id="categoriesSection">
+          <div class="sectionHeader">
+            <h3>Категории</h3>
+            <button id="addCategoryBtn" class="btn small" type="button">
+              <span class="icon">add</span> Новая
+            </button>
+          </div>
+          <div id="categoriesList" class="list"></div>
+          <div id="categoriesEmpty" class="tiny muted2">Категорий пока нет.</div>
+        </div>
+
         <div class="section" id="templatesSection">
           <div class="sectionHeader"><h3>Шаблоны расходов (локально)</h3></div>
           <div class="card bigCard">
@@ -1617,6 +1703,56 @@
         </div>
       </div>
     </section>
+  </div>
+
+  <!-- Category name modal -->
+  <div id="categoryNameModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div id="categoryNameTitle" class="h">Новая категория</div>
+        <button id="closeCategoryNameModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="field">
+            <label>Название</label>
+            <input id="categoryNameInput" class="input" type="text" placeholder="Напр. Коммуналка" />
+          </div>
+          <button id="saveCategoryNameBtn" class="btn primary" type="button">
+            <span class="icon">save</span> Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category merge modal -->
+  <div id="categoryMergeModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Объединить категории</div>
+        <button id="closeCategoryMergeModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="field">
+            <label>Target категория</label>
+            <select id="mergeTargetSelect" class="input"></select>
+          </div>
+          <div class="field">
+            <label>Source категории</label>
+            <div id="mergeSources" class="chips"></div>
+          </div>
+          <div class="badge bad">
+            <span class="icon" style="font-size:16px;">warning</span>
+            операция изменит историю
+          </div>
+          <button id="mergeConfirmBtn" class="btn danger" type="button">
+            <span class="icon">merge_type</span> Объединить
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Month picker modal -->
@@ -1942,6 +2078,7 @@
 
       templates: [],
       categories: [],
+      categoryItems: [],
       attachmentsByExpense: new Map(),
       pendingExpenseFiles: [],
       drafts: [],
@@ -2532,6 +2669,17 @@
       State.yearAnalytics = data;
     }
 
+    async function loadCategories(){
+      try{
+        const data = await API.get("/api/categories");
+        State.categoryItems = data.items || [];
+      }catch(e){
+        State.categoryItems = [];
+      }
+      rebuildCategories();
+      renderCategoriesSection();
+    }
+
     async function ensureSelectedMonthExists(){
       const k = keyYM(State.year, State.month);
       const m = State.monthCache.get(k);
@@ -2577,6 +2725,7 @@
      * Data loading
      **********************/
     async function refreshAll(){
+      await loadCategories();
       await loadYearAnalytics();
       refreshSundayDates();
       if (!State.monthId) {
@@ -2599,10 +2748,6 @@
       State.attachmentsByExpense.clear();
       clearAttachmentBlobCache();
 
-      // derive categories
-      const cats = new Set();
-      State.expenses.forEach(e=>cats.add(e.category));
-      State.categories = Array.from(cats).sort((a,b)=>a.localeCompare(b,"ru"));
       rebuildCategories();
 
       updateDonationDateUI();
@@ -3075,6 +3220,14 @@
     }
 
     function rebuildCategories(){
+      const items = State.categoryItems || [];
+      const activeNames = items.filter(c=>Number(c.is_active||0) === 1).map(c=>c.name);
+      const extraNames = new Set((State.expenses || []).map(e=>e.category).filter(Boolean));
+      activeNames.forEach(name=>extraNames.delete(name));
+      const fallbackNames = Array.from(extraNames).sort((a,b)=>a.localeCompare(b,"ru"));
+      const allNames = items.map(c=>c.name).concat(fallbackNames.filter(n=>!items.find(c=>c.name===n)));
+      State.categories = allNames;
+
       const selExp = $("#expCategory");
       if (selExp){
         selExp.innerHTML = "";
@@ -3082,13 +3235,14 @@
         opt0.value = "";
         opt0.textContent = "— Выбрать категорию —";
         selExp.appendChild(opt0);
-        State.categories.forEach(c=>{
+        const options = activeNames.length ? activeNames : allNames;
+        options.forEach(c=>{
           const o = document.createElement("option");
           o.value = c;
           o.textContent = c;
           selExp.appendChild(o);
         });
-        if (!State.categories.includes("Прочее")){
+        if (!options.includes("Прочее")){
           const o = document.createElement("option");
           o.value = "Прочее";
           o.textContent = "Прочее";
@@ -3104,7 +3258,7 @@
       opt0.value = "";
       opt0.textContent = "Все категории";
       sel.appendChild(opt0);
-      State.categories.forEach(c=>{
+      allNames.forEach(c=>{
         const o = document.createElement("option");
         o.value = c;
         o.textContent = c;
@@ -3789,6 +3943,185 @@
     /**********************
      * Settings UI
      **********************/
+    const CategoryModal = { mode: "create", id: null };
+    const MergeState = { targetId: null, sourceIds: new Set() };
+
+    function openCategoryNameModal({mode="create", category=null}={}){
+      CategoryModal.mode = mode;
+      CategoryModal.id = category ? category.id : null;
+      $("#categoryNameTitle").textContent = mode === "rename" ? "Переименовать категорию" : "Новая категория";
+      $("#categoryNameInput").value = category?.name || "";
+      $("#categoryNameModal").classList.add("show");
+      $("#categoryNameInput").focus();
+    }
+    function closeCategoryNameModal(){
+      $("#categoryNameModal").classList.remove("show");
+    }
+
+    function buildAliasChip(alias){
+      const chip = document.createElement("div");
+      chip.className = "aliasChip";
+      chip.innerHTML = `
+        <span>${escapeHtml(alias.alias || "")}</span>
+        <button type="button" aria-label="Удалить алиас"><span class="icon">close</span></button>
+      `;
+      const btn = chip.querySelector("button");
+      btn.addEventListener("click", async (e)=>{
+        e.stopPropagation();
+        const ok = confirm("Удалить алиас?");
+        if (!ok) return;
+        try{
+          await API.del(`/api/category-aliases/${alias.id}`);
+          await loadCategories();
+          setToast("Алиас удалён");
+        }catch(err){
+          alert(String(err.message || err));
+        }
+      });
+      return chip;
+    }
+
+    function renderCategoriesSection(){
+      const section = $("#categoriesSection");
+      if (!section) return;
+      const isAdmin = State.role === "admin";
+      section.classList.toggle("hidden", !isAdmin);
+      if (!isAdmin) return;
+
+      const list = $("#categoriesList");
+      const empty = $("#categoriesEmpty");
+      list.innerHTML = "";
+      const items = State.categoryItems || [];
+      empty.classList.toggle("hidden", items.length > 0);
+
+      items.forEach((item)=>{
+        const card = document.createElement("div");
+        card.className = "card bigCard collectionCard categoryCard";
+        const active = Number(item.is_active || 0) === 1;
+        const badgeClass = active ? "ok" : "bad";
+        const badgeText = active ? "Активна" : "Неактивна";
+        const aliasCount = item.aliases ? item.aliases.length : 0;
+        card.innerHTML = `
+          <div class="categoryHeader">
+            <button class="collectionToggle" type="button">
+              <div class="categoryMeta">
+                <div class="bold">${escapeHtml(item.name)}</div>
+                <div class="categoryCount">Расходов: ${Number(item.expense_count || 0)}</div>
+              </div>
+              <span class="icon collectionChevron">expand_more</span>
+            </button>
+            <div class="categoryActions">
+              <button class="badge ${badgeClass} categoryStatusBtn" type="button">${badgeText}</button>
+              <button class="btn small categoryRenameBtn" type="button">Переименовать</button>
+              <button class="btn small categoryMergeBtn" type="button">Объединить</button>
+              <button class="btn small categoryAliasesBtn" type="button">Алиасы (${aliasCount})</button>
+            </div>
+          </div>
+          <div class="collectionBody">
+            <div class="aliasList"></div>
+            <div class="row" style="gap:8px; flex-wrap:wrap;">
+              <input class="input aliasInput" type="text" placeholder="Новый алиас" />
+              <button class="btn small aliasAddBtn" type="button"><span class="icon">add</span> Добавить</button>
+            </div>
+          </div>
+        `;
+
+        const toggleBtn = card.querySelector(".collectionToggle");
+        toggleBtn.addEventListener("click", ()=> card.classList.toggle("expanded"));
+        const aliasesBtn = card.querySelector(".categoryAliasesBtn");
+        aliasesBtn.addEventListener("click", ()=> card.classList.toggle("expanded"));
+
+        const aliasList = card.querySelector(".aliasList");
+        (item.aliases || []).forEach(alias=> aliasList.appendChild(buildAliasChip(alias)));
+
+        card.querySelector(".aliasAddBtn").addEventListener("click", async ()=>{
+          const input = card.querySelector(".aliasInput");
+          const alias = (input.value || "").trim();
+          if (!alias) return;
+          try{
+            await API.post(`/api/categories/${item.id}/aliases`, {alias});
+            input.value = "";
+            await loadCategories();
+            setToast("Алиас добавлен");
+          }catch(err){
+            alert(String(err.message || err));
+          }
+        });
+
+        card.querySelector(".categoryRenameBtn").addEventListener("click", ()=>{
+          openCategoryNameModal({mode:"rename", category:item});
+        });
+        card.querySelector(".categoryMergeBtn").addEventListener("click", ()=>{
+          openCategoryMergeModal(item.id);
+        });
+        card.querySelector(".categoryStatusBtn").addEventListener("click", async ()=>{
+          try{
+            await API.put(`/api/categories/${item.id}`, {is_active: !active});
+            await loadCategories();
+            setToast("Статус обновлён");
+          }catch(err){
+            alert(String(err.message || err));
+          }
+        });
+
+        list.appendChild(card);
+      });
+    }
+
+    function openCategoryMergeModal(targetId){
+      const items = State.categoryItems || [];
+      if (!items.length) return;
+      MergeState.targetId = targetId || items[0]?.id || null;
+      MergeState.sourceIds = new Set();
+
+      const targetSelect = $("#mergeTargetSelect");
+      targetSelect.innerHTML = "";
+      items.forEach((item)=>{
+        const opt = document.createElement("option");
+        opt.value = String(item.id);
+        opt.textContent = item.name;
+        targetSelect.appendChild(opt);
+      });
+      if (MergeState.targetId) targetSelect.value = String(MergeState.targetId);
+
+      function buildSources(){
+        const sourceWrap = $("#mergeSources");
+        sourceWrap.innerHTML = "";
+        const targetIdVal = Number(targetSelect.value);
+        items.filter(item=>item.id !== targetIdVal).forEach((item)=>{
+          const chip = document.createElement("div");
+          chip.className = "chip";
+          chip.textContent = item.name;
+          chip.dataset.id = String(item.id);
+          chip.addEventListener("click", ()=>{
+            const id = Number(item.id);
+            if (MergeState.sourceIds.has(id)){
+              MergeState.sourceIds.delete(id);
+              chip.classList.remove("selected");
+            }else{
+              MergeState.sourceIds.add(id);
+              chip.classList.add("selected");
+            }
+            $("#mergeConfirmBtn").disabled = MergeState.sourceIds.size === 0;
+          });
+          sourceWrap.appendChild(chip);
+        });
+        $("#mergeConfirmBtn").disabled = true;
+      }
+
+      buildSources();
+      targetSelect.onchange = ()=>{
+        MergeState.sourceIds = new Set();
+        buildSources();
+      };
+
+      $("#categoryMergeModal").classList.add("show");
+    }
+
+    function closeCategoryMergeModal(){
+      $("#categoryMergeModal").classList.remove("show");
+    }
+
     async function renderSettingsUI(){
       const canSee = (State.role === "admin" || State.role === "accountant" || State.role === "viewer");
       $("#settingsDenied").classList.toggle("hidden", canSee);
@@ -3809,6 +4142,7 @@
       $("#exportSection").classList.toggle("hidden", !(isAdmin || isAccountant));
       $("#usersSection").classList.toggle("hidden", !isAdmin);
       $("#themeSection").classList.toggle("hidden", !(isAdmin || isViewer));
+      $("#categoriesSection").classList.toggle("hidden", !isAdmin);
 
       // Admin-only controls
       const adminOnlyIds = [
@@ -3852,6 +4186,8 @@
 
       // Templates editor
       $("#templatesJson").value = JSON.stringify(State.templates, null, 2);
+
+      renderCategoriesSection();
     }
 
     async function loadThemeSetting(){
@@ -4205,6 +4541,45 @@
           applyTheme(theme);
           setToast("Тема сохранена");
         } catch(e){ alert(String(e.message||e)); }
+      });
+
+      // categories (admin)
+      $("#addCategoryBtn").addEventListener("click", ()=> openCategoryNameModal({mode:"create"}));
+      $("#closeCategoryNameModal").addEventListener("click", closeCategoryNameModal);
+      $("#closeCategoryMergeModal").addEventListener("click", closeCategoryMergeModal);
+      $("#categoryNameModal").addEventListener("click", (e)=>{ if (e.target === $("#categoryNameModal")) closeCategoryNameModal(); });
+      $("#categoryMergeModal").addEventListener("click", (e)=>{ if (e.target === $("#categoryMergeModal")) closeCategoryMergeModal(); });
+      $("#saveCategoryNameBtn").addEventListener("click", async ()=>{
+        const name = ($("#categoryNameInput").value || "").trim();
+        if (!name) return;
+        try{
+          if (CategoryModal.mode === "rename" && CategoryModal.id){
+            await API.put(`/api/categories/${CategoryModal.id}`, {name});
+            setToast("Категория обновлена");
+          }else{
+            await API.post("/api/categories", {name});
+            setToast("Категория создана");
+          }
+          closeCategoryNameModal();
+          await loadCategories();
+        }catch(err){
+          alert(String(err.message || err));
+        }
+      });
+      $("#mergeConfirmBtn").addEventListener("click", async ()=>{
+        const targetId = Number($("#mergeTargetSelect").value || 0);
+        const sourceIds = Array.from(MergeState.sourceIds || []);
+        if (!targetId || sourceIds.length === 0) return;
+        const ok = confirm("Операция изменит историю. Продолжить?");
+        if (!ok) return;
+        try{
+          await API.post("/api/categories/merge", {target_id: targetId, source_ids: sourceIds});
+          closeCategoryMergeModal();
+          await refreshAll();
+          setToast("Категории объединены");
+        }catch(err){
+          alert(String(err.message || err));
+        }
       });
 
       $("#sendSundayNowBtn").addEventListener("click", async ()=>{
