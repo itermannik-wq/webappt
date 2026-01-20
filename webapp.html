@@ -296,6 +296,9 @@
       box-shadow: var(--shadow);
       overflow: hidden;
     }
+    .card.allowOverflow{
+      overflow: visible;
+    }
     .collectionCard{
       padding: 0;
     }
@@ -1170,7 +1173,7 @@
           <span id="mnspsBadge" class="badge">—</span>
         </div>
 
-        <div class="card bigCard">
+        <div class="card bigCard allowOverflow">
           <div class="rowBetween">
             <div class="row" style="align-items:center;">
               <div id="ring" class="ring">
@@ -1430,7 +1433,7 @@
             <span id="draftsCount" class="draftCount">0</span>
           </button>
         </div>
-        <div class="card bigCard">
+        <div class="card bigCard allowOverflow">
           <div class="form">
             <div class="field">
               <label>Дата</label>
