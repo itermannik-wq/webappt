@@ -1483,6 +1483,143 @@ def compute_year_analytics(year: int) -> Dict[str, Any]:
         "bad_months": bad_months,
     }
 
+def compute_period_bounds(
+    period_type: str,
+    year: int,
+    month: Optional[int] = None,
+    quarter: Optional[int] = None,
+) -> Tuple[dt.date, dt.date]:
+    if period_type == "month":
+        if not month:
+            raise HTTPException(status_code=400, detail="month is required for type=month")
+        m = int(month)
+        if m < 1 or m > 12:
+            raise HTTPException(status_code=400, detail="month must be 1..12")
+        start = dt.date(year, m, 1)
+        end = dt.date(year, m, calendar.monthrange(year, m)[1])
+        return start, end
+    if period_type == "quarter":
+        if not quarter:
+            raise HTTPException(status_code=400, detail="quarter is required for type=quarter")
+        q = int(quarter)
+        if q < 1 or q > 4:
+            raise HTTPException(status_code=400, detail="quarter must be 1..4")
+        start_month = (q - 1) * 3 + 1
+        end_month = start_month + 2
+        start = dt.date(year, start_month, 1)
+        end = dt.date(year, end_month, calendar.monthrange(year, end_month)[1])
+        return start, end
+    if period_type == "year":
+        start = dt.date(year, 1, 1)
+        end = dt.date(year, 12, 31)
+        return start, end
+    raise HTTPException(status_code=400, detail="type must be month, quarter, or year")
+
+
+def previous_period(period_type: str, year: int, month: Optional[int], quarter: Optional[int]) -> Tuple[dt.date, dt.date]:
+    if period_type == "month":
+        m = int(month or 1)
+        y = int(year)
+        if m == 1:
+            y -= 1
+            m = 12
+        else:
+            m -= 1
+        return compute_period_bounds("month", y, month=m)
+    if period_type == "quarter":
+        q = int(quarter or 1)
+        y = int(year)
+        if q == 1:
+            y -= 1
+            q = 4
+        else:
+            q -= 1
+        return compute_period_bounds("quarter", y, quarter=q)
+    return compute_period_bounds("year", int(year) - 1)
+
+
+def compute_period_totals(start: dt.date, end: dt.date) -> Dict[str, float]:
+    income = float(
+        db_fetchone(
+            "SELECT COALESCE(SUM(total),0) AS s FROM services WHERE service_date BETWEEN ? AND ?;",
+            (iso_date(start), iso_date(end)),
+        )["s"]
+    )
+    expenses = float(
+        db_fetchone(
+            "SELECT COALESCE(SUM(total),0) AS s FROM expenses WHERE expense_date BETWEEN ? AND ?;",
+            (iso_date(start), iso_date(end)),
+        )["s"]
+    )
+    net = income - expenses
+    return {
+        "income": round(income, 2),
+        "expenses": round(expenses, 2),
+        "net": round(net, 2),
+    }
+
+
+def compute_period_analytics(
+    period_type: str,
+    year: int,
+    month: Optional[int],
+    quarter: Optional[int],
+    include_top_categories: bool,
+    top_limit: int = 5,
+) -> Dict[str, Any]:
+    start, end = compute_period_bounds(period_type, year, month=month, quarter=quarter)
+    prev_start, prev_end = previous_period(period_type, year, month=month, quarter=quarter)
+
+    totals = compute_period_totals(start, end)
+    prev_totals = compute_period_totals(prev_start, prev_end)
+
+    def ratio(cur: float, prev: float) -> Optional[float]:
+        if prev <= 0:
+            return None
+        return (cur - prev) / prev
+
+    delta_income = totals["income"] - prev_totals["income"]
+    delta_expenses = totals["expenses"] - prev_totals["expenses"]
+    delta_net = totals["net"] - prev_totals["net"]
+
+    delta = {
+        "income_abs": round(delta_income, 2),
+        "income_pct": ratio(totals["income"], prev_totals["income"]),
+        "expenses_abs": round(delta_expenses, 2),
+        "expenses_pct": ratio(totals["expenses"], prev_totals["expenses"]),
+        "net_abs": round(delta_net, 2),
+        "net_pct": ratio(totals["net"], prev_totals["net"]),
+    }
+
+    top_expenses: List[Dict[str, Any]] = []
+    if include_top_categories:
+        rows = db_fetchall(
+            """
+            SELECT category, COALESCE(SUM(total),0) AS s
+            FROM expenses
+            WHERE expense_date BETWEEN ? AND ?
+            GROUP BY category
+            ORDER BY s DESC, category ASC
+            LIMIT ?;
+            """,
+            (iso_date(start), iso_date(end), int(top_limit)),
+        )
+        top_expenses = [{"category": r["category"], "sum": round(float(r["s"]), 2)} for r in rows]
+
+    return {
+        "period": {"type": period_type, "start": iso_date(start), "end": iso_date(end)},
+        "totals": totals,
+        "prev": {
+            "start": iso_date(prev_start),
+            "end": iso_date(prev_end),
+            "income": prev_totals["income"],
+            "expenses": prev_totals["expenses"],
+            "net": prev_totals["net"],
+        },
+        "delta": delta,
+        "top_expenses_by_category": top_expenses,
+    }
+
 
 # ---------------------------
 # Audit
@@ -2630,6 +2767,18 @@ def year_analytics(
     u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
 ):
     return compute_year_analytics(int(year))
+
+@APP.get("/api/analytics/period")
+def period_analytics(
+    type: str = Query(..., alias="type"),
+    year: int = Query(...),
+    month: Optional[int] = Query(None),
+    quarter: Optional[int] = Query(None),
+    u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
+):
+    include_top = str(u["role"]) in ("admin", "accountant")
+    return compute_period_analytics(type, int(year), month, quarter, include_top_categories=include_top)
+
 
 
 @APP.put("/api/months/{month_id}")
