@@ -1556,6 +1556,80 @@
             </div>
           </div>
         </div>
+
+
+        <div id="periodCollection" class="card bigCard collectionCard" style="margin-top:12px;">
+          <button id="periodCollectionToggle" class="collectionToggle" type="button" aria-expanded="false">
+            <div class="collectionMeta">
+              <div class="bold">Сводка периодов</div>
+              <div id="periodMeta" class="tiny muted2">—</div>
+            </div>
+            <span class="icon collectionChevron">expand_more</span>
+          </button>
+          <div id="periodCollectionBody" class="collectionBody">
+            <div class="rowBetween" style="margin-top:10px;">
+              <div id="periodTypeSegments" class="segmented" role="tablist" aria-label="Тип периода">
+                <button class="segBtn" type="button" data-type="month" role="tab">Месяц</button>
+                <button class="segBtn" type="button" data-type="quarter" role="tab">Квартал</button>
+                <button class="segBtn" type="button" data-type="year" role="tab">Год</button>
+              </div>
+              <div class="tiny muted2">сравнение с прошлым периодом</div>
+            </div>
+
+            <div class="periodSelectors">
+              <div class="field">
+                <label>Год</label>
+                <select id="periodYearSelect" class="input"></select>
+              </div>
+              <div id="periodMonthWrap" class="field">
+                <label>Месяц</label>
+                <select id="periodMonthSelect" class="input"></select>
+              </div>
+              <div id="periodQuarterWrap" class="field hidden">
+                <label>Квартал</label>
+                <select id="periodQuarterSelect" class="input"></select>
+              </div>
+            </div>
+
+            <div class="grid2" style="margin-top:12px;">
+              <div class="card metric">
+                <div class="label">Доход</div>
+                <div id="periodIncomeValue" class="value mono">—</div>
+                <div class="sub"><span id="periodIncomeDelta" class="deltaBadge">—</span></div>
+              </div>
+              <div class="card metric">
+                <div class="label">Расход</div>
+                <div id="periodExpensesValue" class="value mono">—</div>
+                <div class="sub"><span id="periodExpensesDelta" class="deltaBadge">—</span></div>
+              </div>
+              <div class="card metric">
+                <div class="label">Чистый результат</div>
+                <div id="periodNetValue" class="value mono">—</div>
+                <div class="sub"><span id="periodNetDelta" class="deltaBadge">—</span></div>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Доход vs расход</div>
+                <div class="tiny muted2">за период</div>
+              </div>
+              <div class="chartWrap" style="height:160px;">
+                <canvas id="periodMiniChart"></canvas>
+              </div>
+            </div>
+
+            <div id="periodTopExpensesCard" class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Топ категории расходов</div>
+                <div class="tiny muted2">за период</div>
+              </div>
+              <div class="spacer8"></div>
+              <div id="periodTopExpenses" class="periodTopList"></div>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <div class="section">
