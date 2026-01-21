@@ -1579,11 +1579,25 @@
             <div class="periodSelectors">
               <div class="field">
                 <label>Год</label>
-                <select id="periodYearSelect" class="input"></select>
+                <div id="periodYearDropdown" class="dropdown">
+                  <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="dropdownValue">—</span>
+                    <span class="icon">expand_more</span>
+                  </button>
+                  <div class="dropdownPanel" role="listbox"></div>
+                </div>
+                <select id="periodYearSelect" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
               </div>
               <div id="periodMonthWrap" class="field">
                 <label>Месяц</label>
-                <select id="periodMonthSelect" class="input"></select>
+                <div id="periodMonthDropdown" class="dropdown">
+                  <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="dropdownValue">—</span>
+                    <span class="icon">expand_more</span>
+                  </button>
+                  <div class="dropdownPanel" role="listbox"></div>
+                </div>
+                <select id="periodMonthSelect" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
               </div>
               <div id="periodQuarterWrap" class="field hidden">
                 <label>Квартал</label>
@@ -5731,6 +5745,8 @@
       quarterSelect.value = String(State.periodQuarter || quarterFromMonth(State.periodMonth || State.month || 1));
       updatePeriodSelectorsVisibility();
       updatePeriodSegmentUI();
+      syncDropdown("periodYearSelect");
+      syncDropdown("periodMonthSelect");
     }
 
     function updatePeriodSelectorsVisibility(){
@@ -6175,6 +6191,8 @@
       initDropdownFromSelect("expCategory", "expCategoryDropdown");
       initDropdownFromSelect("expTemplate", "expTemplateDropdown");
       initDropdownFromSelect("histCategorySelect", "histCategoryDropdown");
+      initDropdownFromSelect("periodYearSelect", "periodYearDropdown");
+      initDropdownFromSelect("periodMonthSelect", "periodMonthDropdown");
       setDonationTypeUI();
 
 
@@ -6231,3 +6249,4 @@
   </script>
 </body>
 </html>
+
