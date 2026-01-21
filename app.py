@@ -427,6 +427,14 @@ def init_db() -> None:
         db_exec("ALTER TABLE services ADD COLUMN income_type TEXT NOT NULL DEFAULT 'donation';")
     db_exec("UPDATE services SET income_type='donation' WHERE income_type IS NULL OR income_type='';")
 
+    if not table_has_column("months", "closed_at"):
+        db_exec("ALTER TABLE months ADD COLUMN closed_at TEXT NULL;")
+    if not table_has_column("months", "closed_by_user_id"):
+        db_exec("ALTER TABLE months ADD COLUMN closed_by_user_id INTEGER NULL;")
+    if not table_has_column("months", "is_closed"):
+        db_exec("ALTER TABLE months ADD COLUMN is_closed INTEGER NOT NULL DEFAULT 0;")
+        db_exec("UPDATE months SET is_closed=1 WHERE closed_at IS NOT NULL;")
+
     ensure_categories_from_expenses()
 
 
