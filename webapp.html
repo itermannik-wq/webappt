@@ -5623,20 +5623,9 @@
             <span class="icon">download</span> Скачать
           </button>
         `;
-        card.querySelector(".backupDownloadBtn").addEventListener("click", async ()=>{
-          try{
-            const blob = await API.getBlob(`/api/backups/${encodeURIComponent(item.name)}/download`);
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = item.name;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setTimeout(()=> URL.revokeObjectURL(url), 1000);
-          }catch(err){
-            alert(String(err.message || err));
-          }
+        card.querySelector(".backupDownloadBtn").addEventListener("click", ()=>{
+          const url = `${API.baseUrl}/api/backups/${encodeURIComponent(item.name)}/download`;
+          openDownload(url);
         });
         list.appendChild(card);
       });
@@ -6022,8 +6011,17 @@
      * Exports
      **********************/
     function openDownload(url){
-      // In Telegram in-app browser, this opens the file
-      window.open(url, "_blank");
+      const token = API.token || localStorage.getItem("sessionToken");
+      const finalUrl = token ? (()=> {
+        const u = new URL(url, location.origin);
+        if (!u.searchParams.has("token")) u.searchParams.set("token", token);
+        return u.toString();
+      })() : url;
+      if (tg?.openLink){
+        tg.openLink(finalUrl);
+      } else {
+        window.open(finalUrl, "_blank");
+      }
     }
 
     /**********************
