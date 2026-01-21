@@ -2269,6 +2269,7 @@
      **********************/
     const $ = (sel, root=document) => root.querySelector(sel);
     const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+    const hasPeriodUI = ()=> Boolean($("#periodCollection"));
 
     const fmtMoney = (n) => {
       if (n === null || n === undefined || Number.isNaN(Number(n))) return "—";
@@ -3525,6 +3526,7 @@
     function renderPeriodSummary(){
       const p = State.periodAnalytics;
       const card = $("#periodCollection");
+      if (!card) return;
       if (!p || !p.totals || !p.period) {
         renderPeriodEmpty();
         return;
@@ -3587,7 +3589,12 @@
       const stroke = styles.getPropertyValue("--stroke").trim();
 
       try { State.charts.periodMini?.destroy(); } catch {}
-      const ctx = $("#periodMiniChart").getContext("2d");
+      const canvas = $("#periodMiniChart");
+      if (!canvas) {
+        State.charts.periodMini = null;
+        return;
+      }
+      const ctx = canvas.getContext("2d");
       State.charts.periodMini = new Chart(ctx, {
         type: "bar",
         data: {
@@ -3620,6 +3627,7 @@
     }
 
     function renderPeriodEmpty(){
+      if (!hasPeriodUI()) return;
       $("#periodMeta").textContent = "—";
       $("#periodIncomeValue").textContent = "—";
       $("#periodExpensesValue").textContent = "—";
@@ -5677,12 +5685,16 @@
     }
 
     async function applyPeriodSelection(){
-      State.periodYear = Number($("#periodYearSelect").value || State.year);
+      const yearSelect = $("#periodYearSelect");
+      const monthSelect = $("#periodMonthSelect");
+      const quarterSelect = $("#periodQuarterSelect");
+      if (!yearSelect || !monthSelect || !quarterSelect) return;
+      State.periodYear = Number(yearSelect.value || State.year);
       if (State.periodType === "month") {
-        State.periodMonth = Number($("#periodMonthSelect").value || State.month);
+        State.periodMonth = Number(monthSelect.value || State.month);
       }
       if (State.periodType === "quarter") {
-        State.periodQuarter = Number($("#periodQuarterSelect").value || quarterFromMonth(State.month));
+        State.periodQuarter = Number(quarterSelect.value || quarterFromMonth(State.month));
       }
       await loadPeriodAnalytics();
       renderPeriodSummary();
@@ -5760,34 +5772,42 @@
         const isExpanded = $("#yearCollection").classList.contains("expanded");
         setYearCollectionExpanded(!isExpanded);
       });
-      $("#periodCollectionToggle").addEventListener("click", ()=>{
-        const isExpanded = $("#periodCollection").classList.contains("expanded");
-        setPeriodCollectionExpanded(!isExpanded);
-      });
+      if (hasPeriodUI()){
+        $("#periodCollectionToggle")?.addEventListener("click", ()=>{
+          const isExpanded = $("#periodCollection").classList.contains("expanded");
+          setPeriodCollectionExpanded(!isExpanded);
+        });
+      }
 
       $("#budgetToggle").addEventListener("click", ()=>{
         const isExpanded = $("#budgetCollection").classList.contains("expanded");
         setBudgetCollectionExpanded(!isExpanded);
       });
 
-      $("#periodTypeSegments").addEventListener("click", async (e)=>{
-        const btn = e.target.closest(".segBtn");
-        if (!btn) return;
-        const nextType = btn.dataset.type;
-        if (!nextType || nextType === State.periodType) return;
-        State.periodType = nextType;
-        updatePeriodSegmentUI();
-        updatePeriodSelectorsVisibility();
-        if (State.periodType === "month") {
-          State.periodMonth = Number($("#periodMonthSelect").value || State.month);
-        } else if (State.periodType === "quarter") {
-          State.periodQuarter = Number($("#periodQuarterSelect").value || quarterFromMonth(State.month));
-        }
-        await applyPeriodSelection();
-      });
-      $("#periodYearSelect").addEventListener("change", async ()=>{ await applyPeriodSelection(); });
-      $("#periodMonthSelect").addEventListener("change", async ()=>{ await applyPeriodSelection(); });
-      $("#periodQuarterSelect").addEventListener("change", async ()=>{ await applyPeriodSelection(); });
+      const periodSegments = $("#periodTypeSegments");
+      const periodYearSelect = $("#periodYearSelect");
+      const periodMonthSelect = $("#periodMonthSelect");
+      const periodQuarterSelect = $("#periodQuarterSelect");
+      if (periodSegments && periodYearSelect && periodMonthSelect && periodQuarterSelect){
+        periodSegments.addEventListener("click", async (e)=>{
+          const btn = e.target.closest(".segBtn");
+          if (!btn) return;
+          const nextType = btn.dataset.type;
+          if (!nextType || nextType === State.periodType) return;
+          State.periodType = nextType;
+          updatePeriodSegmentUI();
+          updatePeriodSelectorsVisibility();
+          if (State.periodType === "month") {
+            State.periodMonth = Number(periodMonthSelect.value || State.month);
+          } else if (State.periodType === "quarter") {
+            State.periodQuarter = Number(periodQuarterSelect.value || quarterFromMonth(State.month));
+          }
+          await applyPeriodSelection();
+        });
+        periodYearSelect.addEventListener("change", async ()=>{ await applyPeriodSelection(); });
+        periodMonthSelect.addEventListener("change", async ()=>{ await applyPeriodSelection(); });
+        periodQuarterSelect.addEventListener("change", async ()=>{ await applyPeriodSelection(); });
+      }
 
 
       // add tabs
