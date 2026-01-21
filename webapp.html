@@ -1098,6 +1098,89 @@
       color: var(--muted2);
       margin-top: 3px;
     }
+    .settingsMenuList{
+      display:flex;
+      flex-direction:column;
+      gap: 12px;
+    }
+    .settingsMenuItem{
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--stroke);
+      background: var(--card);
+    }
+    .settingsMenuItem .itemRight .icon{
+      font-size: 20px;
+      color: var(--muted2);
+    }
+    .settingsPanel{
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display:flex;
+      justify-content:center;
+      padding: 0 14px;
+      pointer-events:none;
+    }
+    .settingsPanel.open{
+      pointer-events:auto;
+    }
+    .settingsPanelBackdrop{
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.2);
+      backdrop-filter: blur(2px);
+      opacity: 0;
+      transition: opacity .22s ease;
+    }
+    .settingsPanel.open .settingsPanelBackdrop{
+      opacity: 1;
+    }
+    .settingsPanelContent{
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 520px;
+      margin: 0 auto;
+      min-height: 100%;
+      display:flex;
+      flex-direction:column;
+      padding: calc(var(--safe-top) + 12px) 0 calc(var(--safe-bot) + 12px);
+      opacity: 0;
+      transform: translateX(14px);
+      transition: transform .22s ease, opacity .22s ease;
+      pointer-events:none;
+    }
+    .settingsPanel.open .settingsPanelContent{
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events:auto;
+    }
+    .settingsPanelHeader{
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      padding-bottom: 12px;
+      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--stroke);
+    }
+    .settingsPanelTitle{
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: .2px;
+    }
+    .settingsPanelBody{
+      flex: 1;
+      overflow: auto;
+      padding-top: 8px;
+    }
+    .settingsPanelBody .section{
+      margin-top: 0;
+    }
     .spinner{
       width: 16px;
       height: 16px;
@@ -2251,279 +2334,298 @@
       </div>
 
       <div id="settingsWrap" class="hidden">
-        <div class="section" id="reportsSection">
-          <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
-          <div class="card bigCard">
-            <div class="form">
-              <div class="field">
-                <label>chat_id (куда отправлять)</label>
-                <input id="setChatId" class="input" type="number" inputmode="numeric" placeholder="Напр. -100123..." />
-              </div>
-              <div class="grid2">
-                <div class="field">
-                  <label>Время воскресного отчёта</label>
-                  <input id="setSundayTime" class="input" type="time" />
+        <div id="settingsMenu" class="settingsMenu">
+          <div id="settingsMenuList" class="settingsMenuList"></div>
+        </div>
+
+        <div id="settingsPanel" class="settingsPanel hidden" aria-hidden="true">
+          <div id="settingsPanelBackdrop" class="settingsPanelBackdrop"></div>
+          <div class="settingsPanelContent">
+            <div id="settingsPanelHeader" class="settingsPanelHeader">
+              <button id="settingsPanelBackBtn" class="btnIcon" type="button">
+                <span class="icon">arrow_back</span>
+              </button>
+              <div id="settingsPanelTitle" class="settingsPanelTitle">Настройки</div>
+            </div>
+            <div id="settingsPanelBody" class="settingsPanelBody">
+              <div id="settingsSectionsHost">
+                <div class="section" id="reportsSection">
+                  <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="field">
+                        <label>chat_id (куда отправлять)</label>
+                        <input id="setChatId" class="input" type="number" inputmode="numeric" placeholder="Напр. -100123..." />
+                      </div>
+                      <div class="grid2">
+                        <div class="field">
+                          <label>Время воскресного отчёта</label>
+                          <input id="setSundayTime" class="input" type="time" />
+                        </div>
+                        <div class="field">
+                          <label>Время ежедневного отчёта расходов</label>
+                          <input id="setDailyTime" class="input" type="time" />
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Ежедневный отчёт расходов</label>
+                        <select id="setDailyEnabled" class="input">
+                          <option value="0">Выключено</option>
+                          <option value="1">Включено</option>
+                        </select>
+                      </div>
+                      <button id="saveSettingsBtn" class="btn primary" type="button">
+                        <span class="icon">save</span> Сохранить отчёты
+                      </button>
+                      <div class="row" style="gap:10px; flex-wrap:wrap;">
+                        <button id="sendSundayNowBtn" class="btn small" type="button">
+                          <span class="icon">send</span> Воскресный отчёт сейчас
+                        </button>
+                        <button id="sendExpensesNowBtn" class="btn small" type="button">
+                          <span class="icon">send</span> Расходы сейчас
+                        </button>
+                        <button id="sendTestReportBtn" class="btn small" type="button">
+                          <span class="icon">check_circle</span> Тест отправки отчёта
+                        </button>
+                      </div>
+                      <div class="tiny muted2">Важно: chat_id должен быть установлен заранее.</div>
+                    </div>
+                  </div>
                 </div>
-                <div class="field">
-                  <label>Время ежедневного отчёта расходов</label>
-                  <input id="setDailyTime" class="input" type="time" />
+
+                <div class="section" id="monitorSection">
+                  <div class="sectionHeader">
+                    <h3>Мониторинг</h3>
+                    <button id="monitorRefreshBtn" class="btn small ghost" type="button">
+                      <span class="icon">refresh</span> Обновить
+                    </button>
+                  </div>
+                  <div id="monitorOverviewCard" class="card bigCard monitorOverview">
+                    <div class="grid2">
+                      <div class="miniStat">
+                        <div class="label">Ошибки за 24ч</div>
+                        <div id="monitorErrors24h" class="value">—</div>
+                      </div>
+                      <div class="miniStat">
+                        <div class="label">Fail доставки за 24ч</div>
+                        <div id="monitorDeliveries24h" class="value">—</div>
+                      </div>
+                    </div>
+                    <div id="monitorJobsBlock">
+                      <div class="spacer12"></div>
+                      <div class="tiny muted2">Последние запуски задач</div>
+                      <div id="monitorJobsOverview" class="list" style="margin-top:8px;"></div>
+                    </div>
+                  </div>
+
+
+                  <div class="spacer12"></div>
+                  <div class="tabs">
+                    <button id="tabMonErrors" class="tab active" type="button">Ошибки</button>
+                    <button id="tabMonJobs" class="tab" type="button">Задачи</button>
+                    <button id="tabMonDeliveries" class="tab" type="button">Доставка</button>
+                  </div>
+                  <div class="spacer12"></div>
+                  <div id="monitorList" class="list"></div>
+                  <div id="monitorEmpty" class="card bigCard hidden">
+                    <div class="bold">Пусто</div>
+                    <div class="tiny muted" style="margin-top:6px;">Нет данных для выбранного фильтра.</div>
+                  </div>
                 </div>
-              </div>
-              <div class="field">
-                <label>Ежедневный отчёт расходов</label>
-                <select id="setDailyEnabled" class="input">
-                  <option value="0">Выключено</option>
-                  <option value="1">Включено</option>
-                </select>
-              </div>
-              <button id="saveSettingsBtn" class="btn primary" type="button">
-                <span class="icon">save</span> Сохранить отчёты
-              </button>
-              <div class="row" style="gap:10px; flex-wrap:wrap;">
-                <button id="sendSundayNowBtn" class="btn small" type="button">
-                  <span class="icon">send</span> Воскресный отчёт сейчас
-                </button>
-                <button id="sendExpensesNowBtn" class="btn small" type="button">
-                  <span class="icon">send</span> Расходы сейчас
-                </button>
-                <button id="sendTestReportBtn" class="btn small" type="button">
-                  <span class="icon">check_circle</span> Тест отправки отчёта
-                </button>
-              </div>
-              <div class="tiny muted2">Важно: chat_id должен быть установлен заранее.</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="section" id="monitorSection">
-          <div class="sectionHeader">
-            <h3>Мониторинг</h3>
-            <button id="monitorRefreshBtn" class="btn small ghost" type="button">
-              <span class="icon">refresh</span> Обновить
-            </button>
-          </div>
-          <div id="monitorOverviewCard" class="card bigCard monitorOverview">
-            <div class="grid2">
-              <div class="miniStat">
-                <div class="label">Ошибки за 24ч</div>
-                <div id="monitorErrors24h" class="value">—</div>
-              </div>
-              <div class="miniStat">
-                <div class="label">Fail доставки за 24ч</div>
-                <div id="monitorDeliveries24h" class="value">—</div>
-              </div>
-            </div>
-            <div id="monitorJobsBlock">
-              <div class="spacer12"></div>
-              <div class="tiny muted2">Последние запуски задач</div>
-              <div id="monitorJobsOverview" class="list" style="margin-top:8px;"></div>
-            </div>
-          </div>
-
-          <div class="spacer12"></div>
-          <div class="tabs">
-            <button id="tabMonErrors" class="tab active" type="button">Ошибки</button>
-            <button id="tabMonJobs" class="tab" type="button">Задачи</button>
-            <button id="tabMonDeliveries" class="tab" type="button">Доставка</button>
-          </div>
-          <div class="spacer12"></div>
-          <div id="monitorList" class="list"></div>
-          <div id="monitorEmpty" class="card bigCard hidden">
-            <div class="bold">Пусто</div>
-            <div class="tiny muted" style="margin-top:6px;">Нет данных для выбранного фильтра.</div>
-          </div>
-        </div>
 
 
-        <div class="section" id="monthSection">
-          <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
-          <div class="card bigCard">
-            <div class="form">
-              <div class="field">
-                <label>МНСП на месяц</label>
-                <input id="setMonthlyMin" class="input" type="number" inputmode="decimal" placeholder="Напр. 41502.16" />
-              </div>
-              <div class="field">
-                <label>Режим воскресений (4/5)</label>
-                <select id="setSundaysOverride" class="input">
-                  <option value="">Авто (по календарю)</option>
-                  <option value="4">Вручную: 4</option>
-                  <option value="5">Вручную: 5</option>
-                </select>
-              </div>
-              <div class="grid2">
-                <div class="field">
-                  <label>Стартовый остаток</label>
-                  <input id="setStartBalance" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+                <div class="section" id="monthSection">
+                  <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="field">
+                        <label>МНСП на месяц</label>
+                        <input id="setMonthlyMin" class="input" type="number" inputmode="decimal" placeholder="Напр. 41502.16" />
+                      </div>
+                      <div class="field">
+                        <label>Режим воскресений (4/5)</label>
+                        <select id="setSundaysOverride" class="input">
+                          <option value="">Авто (по календарю)</option>
+                          <option value="4">Вручную: 4</option>
+                          <option value="5">Вручную: 5</option>
+                        </select>
+                      </div>
+                      <div class="grid2">
+                        <div class="field">
+                          <label>Стартовый остаток</label>
+                          <input id="setStartBalance" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+                        </div>
+                        <div class="field">
+                          <label>Часовой пояс</label>
+                          <input id="setTimezone" class="input" type="text" placeholder="Europe/Warsaw" />
+                        </div>
+                      </div>
+                      <button id="saveMonthSettingsBtn" class="btn primary" type="button">
+                        <span class="icon">tune</span> Сохранить месяц
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div class="field">
-                  <label>Часовой пояс</label>
-                  <input id="setTimezone" class="input" type="text" placeholder="Europe/Warsaw" />
+                <div class="section" id="monthCloseSection">
+                  <div class="sectionHeader"><h3>Закрытие месяца</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="rowBetween">
+                        <div class="bold" id="monthCloseStatus">—</div>
+                        <span id="monthCloseBadge" class="badge lock hidden">
+                          <span class="icon" style="font-size:18px">lock</span>
+                          Месяц закрыт
+                        </span>
+                      </div>
+                      <div id="monthCloseMeta" class="tiny muted2">—</div>
+                      <div class="row" style="gap:10px; flex-wrap:wrap;">
+                        <button id="closeMonthBtn" class="btn danger" type="button">
+                          <span class="icon">lock</span> Закрыть месяц
+                        </button>
+                        <button id="reopenMonthBtn" class="btn warn" type="button">
+                          <span class="icon">lock_open</span> Открыть месяц
+                        </button>
+                      </div>
+                      <div class="tiny muted2">Только администратор может закрывать или открывать месяц.</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <button id="saveMonthSettingsBtn" class="btn primary" type="button">
-                <span class="icon">tune</span> Сохранить месяц
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="section" id="monthCloseSection">
-          <div class="sectionHeader"><h3>Закрытие месяца</h3></div>
-          <div class="card bigCard">
-            <div class="form">
-              <div class="rowBetween">
-                <div class="bold" id="monthCloseStatus">—</div>
-                <span id="monthCloseBadge" class="badge lock hidden">
-                  <span class="icon" style="font-size:18px">lock</span>
-                  Месяц закрыт
-                </span>
-              </div>
-              <div id="monthCloseMeta" class="tiny muted2">—</div>
-              <div class="row" style="gap:10px; flex-wrap:wrap;">
-                <button id="closeMonthBtn" class="btn danger" type="button">
-                  <span class="icon">lock</span> Закрыть месяц
-                </button>
-                <button id="reopenMonthBtn" class="btn warn" type="button">
-                  <span class="icon">lock_open</span> Открыть месяц
-                </button>
-              </div>
-              <div class="tiny muted2">Только администратор может закрывать или открывать месяц.</div>
-            </div>
-          </div>
-        </div>
 
 
-        <div class="section" id="themeSection">
-          <div class="sectionHeader"><h3>Тема интерфейса</h3></div>
-          <div class="card bigCard">
-            <div class="form">
-              <div class="field">
-                <label>Тема</label>
-                <select id="setTheme" class="input">
-                  <option value="auto">Системная</option>
-                  <option value="light">Светлая</option>
-                  <option value="dark">Тёмная</option>
-                </select>
-              </div>
-              <button id="saveThemeBtn" class="btn primary" type="button">
-                <span class="icon">palette</span> Сохранить тему
-              </button>
-              <div class="tiny muted2">Изменение темы влияет на всех пользователей.</div>
-            </div>
-          </div>
-        </div>
+                <div class="section" id="themeSection">
+                  <div class="sectionHeader"><h3>Тема интерфейса</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="field">
+                        <label>Тема</label>
+                        <select id="setTheme" class="input">
+                          <option value="auto">Системная</option>
+                          <option value="light">Светлая</option>
+                          <option value="dark">Тёмная</option>
+                        </select>
+                      </div>
+                      <button id="saveThemeBtn" class="btn primary" type="button">
+                        <span class="icon">palette</span> Сохранить тему
+                      </button>
+                      <div class="tiny muted2">Изменение темы влияет на всех пользователей.</div>
+                    </div>
+                  </div>
+                </div>
 
-        <div class="section" id="categoriesSection">
-          <div class="sectionHeader">
-            <h3>Категории</h3>
-            <button id="addCategoryBtn" class="btn small" type="button">
-              <span class="icon">add</span> Новая
-            </button>
-          </div>
-          <div id="categoriesList" class="list"></div>
-          <div id="categoriesEmpty" class="tiny muted2">Категорий пока нет.</div>
-        </div>
+                <div class="section" id="categoriesSection">
+                  <div class="sectionHeader">
+                    <h3>Категории</h3>
+                    <button id="addCategoryBtn" class="btn small" type="button">
+                      <span class="icon">add</span> Новая
+                    </button>
+                  </div>
+                  <div id="categoriesList" class="list"></div>
+                  <div id="categoriesEmpty" class="tiny muted2">Категорий пока нет.</div>
+                </div>
 
-        <div class="section" id="budgetSection">
-          <div class="sectionHeader">
-            <h3>Бюджет</h3>
-            <button id="budgetAddRowBtn" class="btn small" type="button">
-              <span class="icon">add</span> Добавить категорию
-            </button>
-          </div>
-          <div class="card bigCard">
-            <div id="budgetTable" class="budgetTable"></div>
-            <div id="budgetEmpty" class="tiny muted2" style="margin-top:6px;">Лимитов пока нет.</div>
-            <div class="spacer12"></div>
-            <button id="saveBudgetBtn" class="btn primary" type="button">
-              <span class="icon">save</span> Сохранить
-            </button>
-          </div>
-        </div>
+                <div class="section" id="budgetSection">
+                  <div class="sectionHeader">
+                    <h3>Бюджет</h3>
+                    <button id="budgetAddRowBtn" class="btn small" type="button">
+                      <span class="icon">add</span> Добавить категорию
+                    </button>
+                  </div>
+                  <div class="card bigCard">
+                    <div id="budgetTable" class="budgetTable"></div>
+                    <div id="budgetEmpty" class="tiny muted2" style="margin-top:6px;">Лимитов пока нет.</div>
+                    <div class="spacer12"></div>
+                    <button id="saveBudgetBtn" class="btn primary" type="button">
+                      <span class="icon">save</span> Сохранить
+                    </button>
+                  </div>
+                </div>
 
 
-        <div class="section" id="templatesSection">
-          <div class="sectionHeader"><h3>Шаблоны расходов (локально)</h3></div>
-          <div class="card bigCard">
-            <div class="form">
-              <div class="tiny muted2">Хранится в устройстве (localStorage). Можно быстро вводить расходы «в один тап».</div>
-              <textarea id="templatesJson" class="input" rows="8" spellcheck="false"></textarea>
-              <button id="saveTemplatesBtn" class="btn primary" type="button">
-                <span class="icon">save</span> Сохранить шаблоны
-              </button>
-            </div>
-          </div>
-        </div>
+                <div class="section" id="templatesSection">
+                  <div class="sectionHeader"><h3>Шаблоны расходов (локально)</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="tiny muted2">Хранится в устройстве (localStorage). Можно быстро вводить расходы «в один тап».</div>
+                      <textarea id="templatesJson" class="input" rows="8" spellcheck="false"></textarea>
+                      <button id="saveTemplatesBtn" class="btn primary" type="button">
+                        <span class="icon">save</span> Сохранить шаблоны
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
-        <div class="section" id="exportSection">
-          <div class="sectionHeader"><h3>Экспорт</h3></div>
-          <div class="card bigCard">
-            <div class="row" style="gap:10px; flex-wrap:wrap;">
-              <button id="exportCsvBtn" class="btn" type="button">
-                <span class="icon">download</span> Скачать CSV (месяц)
-              </button>
-              <button id="exportXlsxBtn" class="btn" type="button">
-                <span class="icon">download</span> Скачать Excel (год)
-              </button>
-            </div>
-            <div class="tiny muted2" style="margin-top:8px;">Откроется в браузере Telegram (скачивание зависит от клиента).</div>
-          </div>
-        </div>
+                <div class="section" id="exportSection">
+                  <div class="sectionHeader"><h3>Экспорт</h3></div>
+                  <div class="card bigCard">
+                    <div class="row" style="gap:10px; flex-wrap:wrap;">
+                      <button id="exportCsvBtn" class="btn" type="button">
+                        <span class="icon">download</span> Скачать CSV (месяц)
+                      </button>
+                      <button id="exportXlsxBtn" class="btn" type="button">
+                        <span class="icon">download</span> Скачать Excel (год)
+                      </button>
+                    </div>
+                    <div class="tiny muted2" style="margin-top:8px;">Откроется в браузере Telegram (скачивание зависит от клиента).</div>
+                  </div>
+                </div>
 
-        <div class="section" id="backupsSection">
-          <div class="sectionHeader"><h3>Резервные копии</h3></div>
-          <div class="card bigCard">
-            <div class="form">
-              <div class="row" style="gap:10px; flex-wrap:wrap;">
-                <button id="backupDbBtn" class="btn" type="button">
-                  <span class="icon">database</span> Создать DB
-                </button>
-                <button id="backupFullBtn" class="btn" type="button">
-                  <span class="icon">archive</span> Создать FULL
-                </button>
-                <button id="backupRefreshBtn" class="btn small ghost" type="button">
-                  <span class="icon">refresh</span> Обновить
-                </button>
-              </div>
-              <div class="spacer8"></div>
-              <div id="backupDropdown" class="backupDropdown open">
-                <button id="backupDropdownToggle" class="backupDropdownHeader" type="button" aria-expanded="true">
-                  <span>Список резервных копий <span id="backupCount" class="muted2">0</span></span>
-                  <span class="icon">expand_more</span>
-                </button>
-                <div class="backupDropdownBody">
-                  <div class="backupListScroll">
-                    <div id="backupList" class="list"></div>
-                    <div id="backupEmpty" class="tiny muted2">Бэкапов пока нет.</div>
+                <div class="section" id="backupsSection">
+                  <div class="sectionHeader"><h3>Резервные копии</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="row" style="gap:10px; flex-wrap:wrap;">
+                        <button id="backupDbBtn" class="btn" type="button">
+                          <span class="icon">database</span> Создать DB
+                        </button>
+                        <button id="backupFullBtn" class="btn" type="button">
+                          <span class="icon">archive</span> Создать FULL
+                        </button>
+                        <button id="backupRefreshBtn" class="btn small ghost" type="button">
+                          <span class="icon">refresh</span> Обновить
+                        </button>
+                      </div>
+                      <div class="spacer8"></div>
+                      <div id="backupDropdown" class="backupDropdown open">
+                        <button id="backupDropdownToggle" class="backupDropdownHeader" type="button" aria-expanded="true">
+                          <span>Список резервных копий <span id="backupCount" class="muted2">0</span></span>
+                          <span class="icon">expand_more</span>
+                        </button>
+                        <div class="backupDropdownBody">
+                          <div class="backupListScroll">
+                            <div id="backupList" class="list"></div>
+                            <div id="backupEmpty" class="tiny muted2">Бэкапов пока нет.</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="spacer12"></div>
+                      <div class="form">
+                        <label class="tiny muted2">Восстановить из файла</label>
+                        <div class="filePicker">
+                          <input id="backupRestoreInput" class="fileInput" type="file" accept=".sqlite3,.zip" />
+                          <label for="backupRestoreInput" class="btn ghost">Выбрать файл</label>
+                          <div class="filePickMeta">
+                            <div id="backupRestoreFileLabel" class="filePickName">Файл не выбран</div>
+                            <div class="filePickHint">.sqlite3 или .zip</div>
+                          </div>
+                        </div>
+                        <button id="backupRestoreBtn" class="btn danger" type="button" disabled>
+                          <span class="icon">restore</span> Восстановить
+                        </button>
+                        <div id="backupRestoreHint" class="tiny muted2">После выбора файла потребуется подтверждение.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+
+                <div class="section" id="usersSection">
+                  <div class="sectionHeader"><h3>Пользователи</h3></div>
+                  <div class="card bigCard">
+                    <div class="tiny muted2">Управление пользователями — через users.json (MVP). UI-редактор можно добавить позже.</div>
                   </div>
                 </div>
               </div>
-              <div class="spacer12"></div>
-              <div class="form">
-                <label class="tiny muted2">Восстановить из файла</label>
-                <div class="filePicker">
-                  <input id="backupRestoreInput" class="fileInput" type="file" accept=".sqlite3,.zip" />
-                  <label for="backupRestoreInput" class="btn ghost">Выбрать файл</label>
-                  <div class="filePickMeta">
-                    <div id="backupRestoreFileLabel" class="filePickName">Файл не выбран</div>
-                    <div class="filePickHint">.sqlite3 или .zip</div>
-                  </div>
-                </div>
-                <button id="backupRestoreBtn" class="btn danger" type="button" disabled>
-                  <span class="icon">restore</span> Восстановить
-                </button>
-                <div id="backupRestoreHint" class="tiny muted2">После выбора файла потребуется подтверждение.</div>
-              </div>
             </div>
-          </div>
-        </div>
-
-
-        <div class="section" id="usersSection">
-          <div class="sectionHeader"><h3>Пользователи</h3></div>
-          <div class="card bigCard">
-            <div class="tiny muted2">Управление пользователями — через users.json (MVP). UI-редактор можно добавить позже.</div>
           </div>
         </div>
       </div>
@@ -3033,6 +3135,8 @@
       backupKnownNames: new Set(),
       backupRestoreFile: null,
       backupBusy: false,
+      settingsPage: null,
+      settingsScroll: { menu: 0, page: 0 },
     };
 
     /**********************
@@ -5199,6 +5303,7 @@
       for(const k in map){
         map[k].classList.toggle("active", k === name);
       }
+      if (name !== "settings") closeSettingsPage({immediate:true});
       // nav
       $$(".navBtn").forEach(b=>b.classList.toggle("active", b.dataset.screen===name));
       // hide sticky actions when not on add
@@ -6171,31 +6276,198 @@
       loadMonitorList(which);
     }
 
+    const SettingsMenuConfig = [
+      {
+        id: "reportsSection",
+        title: "Отчёты",
+        subtitle: "Отправка и тесты",
+        icon: "assessment",
+        rolesVisible: ["admin"],
+        rolesEditable: ["admin"],
+      },
+      {
+        id: "monthSection",
+        title: "Параметры месяца",
+        subtitle: "МНСП, баланс, часовой пояс",
+        icon: "tune",
+        rolesVisible: ["admin"],
+        rolesEditable: ["admin"],
+      },
+      {
+        id: "monthCloseSection",
+        title: "Закрытие месяца",
+        subtitle: "Статус и доступы",
+        icon: "lock",
+        rolesVisible: ["admin", "accountant", "viewer"],
+        rolesEditable: ["admin"],
+      },
+      {
+        id: "templatesSection",
+        title: "Шаблоны",
+        subtitle: "Локальные пресеты расходов",
+        icon: "description",
+        rolesVisible: ["admin", "accountant"],
+        rolesEditable: ["admin", "accountant"],
+      },
+      {
+        id: "exportSection",
+        title: "Экспорт",
+        subtitle: "CSV и Excel",
+        icon: "download",
+        rolesVisible: ["admin", "accountant"],
+        rolesEditable: ["admin", "accountant"],
+      },
+      {
+        id: "usersSection",
+        title: "Пользователи",
+        subtitle: "Доступ и роли",
+        icon: "group",
+        rolesVisible: ["admin"],
+        rolesEditable: ["admin"],
+      },
+      {
+        id: "themeSection",
+        title: "Тема интерфейса",
+        subtitle: "Светлая или тёмная",
+        icon: "palette",
+        rolesVisible: ["admin", "viewer"],
+        rolesEditable: ["admin", "viewer"],
+      },
+      {
+        id: "categoriesSection",
+        title: "Категории",
+        subtitle: "Список категорий расходов",
+        icon: "category",
+        rolesVisible: ["admin"],
+        rolesEditable: ["admin"],
+      },
+      {
+        id: "budgetSection",
+        title: "Бюджет",
+        subtitle: "Лимиты по категориям",
+        icon: "account_balance_wallet",
+        rolesVisible: ["admin", "accountant"],
+        rolesEditable: ["admin", "accountant"],
+      },
+      {
+        id: "backupsSection",
+        title: "Бэкапы",
+        subtitle: "Резервные копии базы",
+        icon: "backup",
+        rolesVisible: ["admin"],
+        rolesEditable: ["admin"],
+      },
+      {
+        id: "monitorSection",
+        title: "Мониторинг",
+        subtitle: "Ошибки и доставка",
+        icon: "monitoring",
+        rolesVisible: ["admin", "accountant"],
+        rolesEditable: ["admin", "accountant"],
+      },
+    ];
+    const SettingsMenuMap = new Map(SettingsMenuConfig.map((item)=>[item.id, item]));
+
+    function renderSettingsMenu(){
+      const list = $("#settingsMenuList");
+      if (!list) return [];
+      const role = State.role;
+      const visibleIds = [];
+      list.innerHTML = "";
+      SettingsMenuConfig.forEach((item)=>{
+        if (!item.rolesVisible.includes(role)) return;
+        visibleIds.push(item.id);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "item settingsMenuItem";
+        btn.innerHTML = `
+          <div class="itemLeft">
+            <div class="itemIco"><span class="icon">${item.icon}</span></div>
+            <div class="itemText">
+              <div class="t">${escapeHtml(item.title)}</div>
+              <div class="s">${escapeHtml(item.subtitle)}</div>
+            </div>
+          </div>
+          <div class="itemRight"><span class="icon">chevron_right</span></div>
+        `;
+        btn.addEventListener("click", ()=> openSettingsPage(item.id));
+        list.appendChild(btn);
+      });
+      return visibleIds;
+    }
+
+    function openSettingsPage(sectionId){
+      const config = SettingsMenuMap.get(sectionId);
+      if (!config || !config.rolesVisible.includes(State.role)) return;
+      State.settingsScroll.menu = window.scrollY || 0;
+      State.settingsPage = sectionId;
+      const panel = $("#settingsPanel");
+      const title = $("#settingsPanelTitle");
+      const body = $("#settingsPanelBody");
+      if (!panel || !title || !body) return;
+      title.textContent = config.title;
+      $$("#settingsSectionsHost .section").forEach((sec)=>{
+        sec.classList.add("hidden");
+        sec.classList.remove("activePage");
+      });
+      const active = $("#"+sectionId);
+      if (active){
+        active.classList.remove("hidden");
+        active.classList.add("activePage");
+      }
+      panel.classList.remove("hidden");
+      panel.setAttribute("aria-hidden", "false");
+      body.scrollTop = State.settingsScroll.page || 0;
+      requestAnimationFrame(()=> panel.classList.add("open"));
+      if (active){
+        const focusable = active.querySelector("input, select, textarea, button");
+        if (focusable) {
+          setTimeout(()=> focusable.focus({preventScroll:true}), 120);
+        }
+      }
+    }
+
+    function closeSettingsPage({immediate=false}={}){
+      const panel = $("#settingsPanel");
+      const body = $("#settingsPanelBody");
+      if (!panel || panel.classList.contains("hidden")) return;
+      State.settingsScroll.page = body ? body.scrollTop : 0;
+      const finish = ()=>{
+        panel.classList.add("hidden");
+        panel.setAttribute("aria-hidden", "true");
+        $$("#settingsSectionsHost .section").forEach((sec)=>{
+          sec.classList.add("hidden");
+          sec.classList.remove("activePage");
+        });
+        State.settingsPage = null;
+        window.scrollTo({top: State.settingsScroll.menu || 0});
+      };
+      if (immediate){
+        panel.classList.remove("open");
+        finish();
+        return;
+      }
+      panel.classList.remove("open");
+      window.setTimeout(finish, 240);
+    }
+
     async function renderSettingsUI(){
       const canSee = (State.role === "admin" || State.role === "accountant" || State.role === "viewer");
       $("#settingsDenied").classList.toggle("hidden", canSee);
       $("#settingsWrap").classList.toggle("hidden", !canSee);
+      if (!canSee) return;
 
       // accountant: show only local templates section (MVP) + exports
       const isAdmin = State.role === "admin";
       const isViewer = State.role === "viewer";
       const isAccountant = State.role === "accountant";
-      // hide admin-only blocks
-      $$(".section", $("#screenSettings")).forEach(sec=>{
-        // default show; we'll hide specific controls inside
+      const visibleIds = renderSettingsMenu();
+      if (State.settingsPage && !visibleIds.includes(State.settingsPage)){
+        closeSettingsPage({immediate:true});
+      }
+      $$("#settingsSectionsHost .section").forEach((sec)=>{
+        sec.classList.add("hidden");
       });
-
-      $("#reportsSection").classList.toggle("hidden", !isAdmin);
-      $("#monthSection").classList.toggle("hidden", !isAdmin);
-      $("#monthCloseSection").classList.toggle("hidden", !(isAdmin || isAccountant || isViewer));
-      $("#templatesSection").classList.toggle("hidden", !(isAdmin || isAccountant));
-      $("#exportSection").classList.toggle("hidden", !(isAdmin || isAccountant));
-      $("#usersSection").classList.toggle("hidden", !isAdmin);
-      $("#themeSection").classList.toggle("hidden", !(isAdmin || isViewer));
-      $("#categoriesSection").classList.toggle("hidden", !isAdmin);
-      $("#budgetSection").classList.toggle("hidden", !(isAdmin || isAccountant));
-      $("#backupsSection").classList.toggle("hidden", !isAdmin);
-      $("#monitorSection").classList.toggle("hidden", !(isAdmin || isAccountant));
 
       // Admin-only controls
       const adminOnlyIds = [
@@ -6845,6 +7117,11 @@
 
 
       // settings
+      $("#settingsPanelBackBtn").addEventListener("click", ()=> closeSettingsPage());
+      $("#settingsPanelBackdrop").addEventListener("click", ()=> closeSettingsPage());
+      document.addEventListener("keydown", (e)=>{
+        if (e.key === "Escape") closeSettingsPage();
+      });
       $("#saveSettingsBtn").addEventListener("click", async ()=>{
         try{
           await API.put("/api/settings", {
