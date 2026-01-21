@@ -1,0 +1,1147 @@
+<!-- webapp.html
+  Telegram WebApp UI (один файл, без сборки)
+  Требования: mobile-first, тёмная тема из Telegram theme params, bottom bar, анимации, Chart.js.
+-->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <title>БУХ • Бухгалтерия</title>
+
+  <!-- Telegram WebApp -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Material Symbols -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:wght@300;400;500;600&display=swap" />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <link rel="stylesheet" href="/static/webapp.css" />
+</head>
+
+<body>
+  <div class="toast">
+    <div id="toastCard" class="toastCard">
+      <div class="check"></div>
+      <div class="small bold">Сохранено</div>
+    </div>
+  </div>
+
+  <div class="app">
+    <div class="topbar">
+      <div class="monthTitle">
+        <button id="monthBtn" class="pill" type="button" aria-label="Выбор месяца">
+          <span class="icon">calendar_month</span>
+          <span id="monthTitle" class="title">—</span>
+          <span class="icon" style="font-size:20px;color:var(--muted)">expand_more</span>
+        </button>
+      </div>
+      <div class="row" style="gap:10px;">
+        <button id="refreshBtn" class="btnIcon" type="button" aria-label="Обновить">
+          <span class="icon">refresh</span>
+        </button>
+        <span id="roleBadge" class="badge">роль: —</span>
+      </div>
+    </div>
+    <div class="monthClosedRow">
+      <span id="monthClosedBadge" class="badge lock hidden">
+        <span class="icon" style="font-size:18px">lock</span>
+        Месяц закрыт
+      </span>
+    </div>
+
+    <!-- SCREEN: DASHBOARD -->
+    <section id="screenDashboard" class="screen active">
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Ключевые показатели</h3>
+          <span id="monthMeta" class="tiny muted2"></span>
+        </div>
+
+        <div class="grid2">
+          <div class="card metric">
+            <div class="label">Доход за месяц</div>
+            <div id="mIncome" class="value mono">—</div>
+            <div class="sub">Σ воскресенья</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Расход за месяц</div>
+            <div id="mExpenses" class="value mono">—</div>
+            <div class="sub">Σ расходов</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Баланс на месяц</div>
+            <div id="mBalance" class="value mono">—</div>
+            <div class="sub">доход − расход</div>
+          </div>
+          <div class="card metric">
+            <div class="label">Факт. баланс</div>
+            <div id="mFactBalance" class="value mono">—</div>
+            <div class="sub">остаток + баланс</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Выполнение МНСП</h3>
+          <span id="mnspsBadge" class="badge">—</span>
+        </div>
+
+        <div class="card bigCard allowOverflow">
+          <div class="rowBetween">
+            <div class="row" style="align-items:center;">
+              <div id="ring" class="ring">
+                <div class="ringInner">
+                  <div>
+                    <div id="mCompletion" class="pct mono">—</div>
+                    <div class="cap">МНСП</div>
+                  </div>
+                </div>
+              </div>
+              <div style="min-width:0;">
+                <div class="small muted">МНСП месяц</div>
+                <div id="mMinNeeded" class="bold mono" style="font-size:16px;margin-top:2px;">—</div>
+                <div class="spacer8"></div>
+                <div class="small muted">Собрано</div>
+                <div id="mCollected" class="bold mono" style="font-size:16px;margin-top:2px;">—</div>
+                <div class="spacer8"></div>
+                <div id="mNeedMore" class="tiny muted2">—</div>
+              </div>
+            </div>
+            <div class="right">
+              <div class="tiny muted2">СДДР</div>
+              <div id="mSDDR" class="bold mono" style="margin-top:4px;">—</div>
+              <div class="spacer8"></div>
+              <div class="tiny muted2">ПСДПМ</div>
+              <div id="mPSDPM" class="bold mono" style="margin-top:4px;">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Подборки</h3>
+          <span class="tiny muted2">Редкие отчёты</span>
+        </div>
+
+        <div id="yearCollection" class="card bigCard collectionCard">
+          <button id="yearCollectionToggle" class="collectionToggle" type="button" aria-expanded="false">
+            <div class="collectionMeta">
+              <div class="bold">Годовая аналитика</div>
+              <div id="yearMeta" class="tiny muted2">—</div>
+            </div>
+            <span class="icon collectionChevron">expand_more</span>
+          </button>
+          <div id="yearCollectionBody" class="collectionBody">
+            <div class="grid2">
+              <div class="card metric">
+                <div class="label">Доход года (YTD)</div>
+                <div id="yIncome" class="value mono">—</div>
+                <div class="sub">Σ пожертвования</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Расход года (YTD)</div>
+                <div id="yExpenses" class="value mono">—</div>
+                <div class="sub">Σ расходов</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Баланс года (YTD)</div>
+                <div id="yBalance" class="value mono">—</div>
+                <div class="sub">доход − расход</div>
+              </div>
+              <div class="card metric">
+                <div class="label">Рост к прошлому году</div>
+                <div id="yYoY" class="value mono">—</div>
+                <div class="sub">по доходу</div>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Динамика доходов и расходов</div>
+                <div class="tiny muted2">по месяцам</div>
+              </div>
+              <div class="chartWrap">
+                <canvas id="yearLine"></canvas>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Баланс по месяцам</div>
+                <div class="tiny muted2">профицит/дефицит</div>
+              </div>
+              <div class="chartWrap">
+                <canvas id="yearBalanceBar"></canvas>
+              </div>
+            </div>
+
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="grid2">
+                <div>
+                  <div class="small muted">Хорошие месяцы</div>
+                  <div id="goodMonths" class="chips"></div>
+                </div>
+                <div>
+                  <div class="small muted">Плохие месяцы</div>
+                  <div id="badMonths" class="chips"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+        <div id="periodCollection" class="card bigCard collectionCard" style="margin-top:12px;">
+          <button id="periodCollectionToggle" class="collectionToggle" type="button" aria-expanded="false">
+            <div class="collectionMeta">
+              <div class="bold">Сводка периодов</div>
+              <div id="periodMeta" class="tiny muted2">—</div>
+            </div>
+            <span class="icon collectionChevron">expand_more</span>
+          </button>
+          <div id="periodCollectionBody" class="collectionBody">
+            <div class="rowBetween" style="margin-top:10px;">
+              <div id="periodTypeSegments" class="segmented" role="tablist" aria-label="Тип периода">
+                <button class="segBtn" type="button" data-type="month" role="tab">Месяц</button>
+                <button class="segBtn" type="button" data-type="quarter" role="tab">Квартал</button>
+                <button class="segBtn" type="button" data-type="year" role="tab">Год</button>
+              </div>
+              <div class="tiny muted2">сравнение с прошлым периодом</div>
+            </div>
+
+            <div class="periodSelectors">
+              <div class="field">
+                <label>Год</label>
+                <div id="periodYearDropdown" class="dropdown">
+                  <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="dropdownValue">—</span>
+                    <span class="icon">expand_more</span>
+                  </button>
+                  <div class="dropdownPanel" role="listbox"></div>
+                </div>
+                <select id="periodYearSelect" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+              </div>
+              <div id="periodMonthWrap" class="field">
+                <label>Месяц</label>
+                <div id="periodMonthDropdown" class="dropdown">
+                  <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="dropdownValue">—</span>
+                    <span class="icon">expand_more</span>
+                  </button>
+                  <div class="dropdownPanel" role="listbox"></div>
+                </div>
+                <select id="periodMonthSelect" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+              </div>
+              <div id="periodQuarterWrap" class="field hidden">
+                <label>Квартал</label>
+                <select id="periodQuarterSelect" class="input"></select>
+              </div>
+            </div>
+
+            <div class="grid2" style="margin-top:12px;">
+              <div class="card metric">
+                <div class="label">Доход</div>
+                <div id="periodIncomeValue" class="value mono">—</div>
+                <div class="sub"><span id="periodIncomeDelta" class="deltaBadge">—</span></div>
+              </div>
+              <div class="card metric">
+                <div class="label">Расход</div>
+                <div id="periodExpensesValue" class="value mono">—</div>
+                <div class="sub"><span id="periodExpensesDelta" class="deltaBadge">—</span></div>
+              </div>
+              <div class="card metric">
+                <div class="label">Чистый результат</div>
+                <div id="periodNetValue" class="value mono">—</div>
+                <div class="sub"><span id="periodNetDelta" class="deltaBadge">—</span></div>
+              </div>
+            </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Доход vs расход</div>
+                <div class="tiny muted2">за период</div>
+              </div>
+              <div class="chartWrap" style="height:160px;">
+                <canvas id="periodMiniChart"></canvas>
+              </div>
+            </div>
+
+            <div id="periodTopExpensesCard" class="card bigCard" style="margin-top:12px;">
+              <div class="rowBetween">
+                <div class="small muted">Топ категории расходов</div>
+                <div class="tiny muted2">за период</div>
+              </div>
+              <div class="spacer8"></div>
+              <div id="periodTopExpenses" class="periodTopList"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Пожертвования по воскресеньям</h3>
+          <button id="addSundayBtn" class="btn small" type="button">
+            <span class="icon">add</span> Добавить
+          </button>
+        </div>
+        <div class="card bigCard allowOverflow">
+          <div class="chartWrap">
+            <canvas id="sundayBar"></canvas>
+          </div>
+          <div class="spacer8"></div>
+          <div id="sundayBadges" class="chips"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Бюджет месяца</h3>
+          <span id="budgetMeta" class="tiny muted2">—</span>
+        </div>
+        <div id="budgetCollection" class="card bigCard collectionCard expanded">
+          <button id="budgetToggle" class="collectionToggle" type="button" aria-expanded="true">
+            <div class="collectionMeta">
+              <div class="bold">Лимиты по категориям</div>
+              <div id="budgetSubtitle" class="tiny muted2">—</div>
+            </div>
+            <span class="icon collectionChevron">expand_more</span>
+          </button>
+          <div id="budgetCollectionBody" class="collectionBody">
+            <div id="budgetList" class="budgetList"></div>
+          </div>
+        </div>
+      </div>
+
+
+      <div class="section">
+        <div class="sectionHeader">
+          <h3>Расходы текущего месяца</h3>
+          <button id="allExpensesBtn" class="btn small" type="button">
+            <span class="icon">receipt_long</span> Все
+          </button>
+        </div>
+        <div class="card bigCard">
+          <div class="chartWrap small">
+            <canvas id="expensePie"></canvas>
+          </div>
+          <div class="divider"></div>
+          <div class="rowBetween">
+            <div class="small muted">Сумма расходов</div>
+            <div id="expenseSum" class="bold mono">—</div>
+          </div>
+          <div class="spacer12"></div>
+          <div id="lastExpensesList" class="list"></div>
+        </div>
+      </div>
+
+      <div id="dashEmptyState" class="section hidden">
+        <div class="card bigCard">
+          <div class="bold">Нет месяца в базе</div>
+          <div class="tiny muted" style="margin-top:6px;">
+            Админ может создать месяц в настройках или через кнопку ниже.
+          </div>
+          <div class="spacer12"></div>
+          <button id="createMonthBtn" class="btn primary" type="button">
+            <span class="icon">add_circle</span> Создать месяц
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREEN: ADD -->
+    <section id="screenAdd" class="screen">
+      <div class="tabs">
+        <button id="tabDonation" class="tab active" type="button">Пожертвование</button>
+        <button id="tabExpense" class="tab" type="button">Расход</button>
+      </div>
+
+      <div id="addClosedCard" class="card bigCard closedCard hidden">
+        <span class="icon">lock</span>
+        <div class="bold" style="margin-top:8px;">Месяц закрыт, изменения запрещены</div>
+      </div>
+
+      <!-- Donation form -->
+      <div id="addDonationWrap">
+        <div class="card bigCard" id="addDonationCard">
+          <div id="donSundayWrap" class="rowBetween">
+            <div class="small muted">Дата (воскресенье)</div>
+            <div class="row" style="gap:8px;">
+              <button id="sunPrev" class="btnIcon" type="button" aria-label="Предыдущее воскресенье">
+                <span class="icon">chevron_left</span>
+              </button>
+              <span id="sunDateLabel" class="badge">—</span>
+              <button id="sunNext" class="btnIcon" type="button" aria-label="Следующее воскресенье">
+                <span class="icon">chevron_right</span>
+              </button>
+            </div>
+          </div>
+          <div id="donOtherDateWrap" class="field hidden" style="margin-top:8px;">
+            <label>Дата дохода</label>
+            <input id="donOtherDate" class="input" type="date" />
+          </div>
+
+          <div class="spacer12"></div>
+
+          <div class="form">
+            <div class="field">
+              <label>Тип дохода</label>
+              <div id="donIncomeTypeDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="donIncomeType" class="input hiddenSelect" tabindex="-1" aria-hidden="true">
+                <option value="donation">Пожертвование (10% Объединение)</option>
+                <option value="other">Иной доход (без 10%)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Безнал</label>
+              <input id="donCashless" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+            </div>
+            <div class="field">
+              <label>Наличные</label>
+              <input id="donCash" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+            </div>
+            <div class="field">
+              <label>Итого</label>
+              <input id="donTotal" class="input" type="text" readonly value="0.00" />
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="rowBetween">
+              <div>
+                <div class="tiny muted2">Минимум на воскресенье</div>
+                <div id="donWeeklyMin" class="bold mono" style="margin-top:4px;">—</div>
+              </div>
+              <div class="right">
+                <div id="donStatus" class="badge">—</div>
+                <div class="tiny muted2" style="margin-top:6px;">ПВС: <span id="donPvs" class="mono bold">—</span></div>
+              </div>
+            </div>
+
+            <div class="chips" id="donChips">
+              <div class="chip" data-add="100">+100</div>
+              <div class="chip" data-add="200">+200</div>
+              <div class="chip" data-add="500">+500</div>
+              <div class="chip" data-add="1000">+1000</div>
+              <div class="chip" id="copyPrevSunday"><span class="icon" style="font-size:18px">content_copy</span> Повторить прошлое</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stickyActions">
+          <div class="stickyInner">
+            <button id="saveDonationBtn" class="btn primary" type="button">
+              <span class="icon">check_circle</span> Сохранить
+            </button>
+            <button id="saveDonationNextBtn" class="btn ghost" type="button">
+              Сохранить и добавить следующее
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Expense form -->
+      <div id="addExpenseWrap" class="hidden">
+        <div id="draftsCard" class="card miniCard hidden">
+          <button id="openDraftsBtn" class="draftsCardBtn" type="button">
+            <div class="row">
+              <span class="icon">draft</span>
+              <span class="bold">Черновики</span>
+            </div>
+            <span id="draftsCount" class="draftCount">0</span>
+          </button>
+        </div>
+        <div class="card bigCard allowOverflow" id="addExpenseCard">
+          <div class="form">
+            <div class="field">
+              <label>Дата</label>
+              <input id="expDate" class="input" type="date" />
+            </div>
+
+            <div class="field">
+              <label>Категория</label>
+              <div id="expCategoryDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="expCategory" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+            </div>
+
+            <div class="field">
+              <label>Шаблон (один тап)</label>
+              <div id="expTemplateDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="expTemplate" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+              <div class="tiny muted2">Шаблоны редактируются в Настройках (локально).</div>
+            </div>
+
+            <div class="field">
+              <label>Название</label>
+              <input id="expTitle" class="input" type="text" placeholder="Напр. Оплата за зал" />
+            </div>
+
+            <div class="grid2">
+              <div class="field">
+                <label>Количество</label>
+                <input id="expQty" class="input" type="number" inputmode="decimal" value="1" />
+              </div>
+              <div class="field">
+                <label>Сумма</label>
+                <input id="expUnit" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Итог</label>
+              <input id="expTotal" class="input" type="text" readonly value="0.00" />
+              <div id="expBudgetIndicator" class="budgetIndicator hidden"></div>
+            </div>
+
+            <div class="field">
+              <label>Комментарий</label>
+              <textarea id="expComment" class="input" rows="3" placeholder="Необязательно"></textarea>
+            </div>
+
+            <div class="field">
+              <label>Теги</label>
+              <div id="expTagsChips" class="tagChips"></div>
+              <button id="expTagsAddBtn" class="btn small" type="button">
+                <span class="icon">add</span> Добавить
+              </button>
+            </div>
+
+            <div id="expWarn" class="badge warn hidden">
+              <span class="icon" style="font-size:18px">warning</span>
+              Расход может превышать доступный баланс/СДДР
+            </div>
+            <div id="expBudgetWarn" class="badge warn hidden">
+              <span class="icon" style="font-size:18px">warning</span>
+              Расход превышает лимит бюджета категории
+            </div>
+          </div>
+        </div>
+
+        <div class="card bigCard" id="expenseAttachmentCard">
+          <div class="form">
+            <div class="rowBetween">
+              <div class="bold">Чек/скан</div>
+              <button id="expAttachBtn" class="btn small" type="button">
+                <span class="icon">photo_camera</span> Добавить
+              </button>
+            </div>
+            <input id="expAttachInput" type="file" class="hidden" multiple accept="image/jpeg,image/png,image/webp,application/pdf" />
+            <div id="expAttachGrid" class="attachmentGrid"></div>
+            <div id="expAttachHint" class="tiny muted2 attachHint">Файлы загрузятся после сохранения расхода.</div>
+          </div>
+        </div>
+
+        <div class="stickyActions">
+          <div class="stickyInner">
+            <button id="saveExpenseBtn" class="btn primary" type="button">
+              <span class="icon">check_circle</span> Сохранить расход
+            </button>
+            <button id="saveExpenseMoreBtn" class="btn ghost" type="button">
+              Сохранить и добавить ещё
+            </button>
+            <button id="saveExpenseDraftBtn" class="btn ghost" type="button">
+              В черновик
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREEN: HISTORY -->
+    <section id="screenHistory" class="screen">
+      <div class="tabs">
+        <button id="tabHistDon" class="tab active" type="button">Пожертвования</button>
+        <button id="tabHistExp" class="tab" type="button">Расходы</button>
+      </div>
+
+      <div class="card bigCard">
+        <div class="form" style="gap:10px;">
+          <div class="grid2">
+            <div class="field">
+              <label>Месяц</label>
+              <div id="histMonthDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="histMonthSelect" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+            </div>
+            <div class="field" id="histCatWrap">
+              <label>Категория</label>
+              <div id="histCategoryDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="histCategorySelect" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Поиск</label>
+            <input id="histSearch" class="input" type="text" placeholder="Название / комментарий" />
+          </div>
+          <div class="field" id="histTagsWrap">
+            <label>Теги</label>
+            <div class="rowBetween" style="gap:10px; flex-wrap:wrap;">
+              <div id="histTagsChips" class="tagChips"></div>
+              <button id="histTagsResetBtn" class="btn small ghost" type="button">Сброс</button>
+            </div>
+            <button id="histTagsAddBtn" class="btn small" type="button">
+              <span class="icon">add</span> Выбрать теги
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="spacer12"></div>
+      <div id="histList" class="list"></div>
+      <div id="histEmpty" class="card bigCard hidden">
+        <div class="bold">Пусто</div>
+        <div class="tiny muted" style="margin-top:6px;">Добавьте записи через вкладку «Добавить».</div>
+      </div>
+    </section>
+
+    <!-- SCREEN: SETTINGS -->
+    <section id="screenSettings" class="screen">
+      <div id="settingsDenied" class="card bigCard hidden">
+        <div class="bold">Недоступно</div>
+        <div class="tiny muted" style="margin-top:6px;">У вашей роли нет доступа к настройкам.</div>
+      </div>
+
+      <div id="settingsWrap" class="hidden">
+        <div id="settingsMenu" class="settingsMenu">
+          <div class="settingsMenuHeader">
+            <div class="settingsMenuTitle">Настройки</div>
+          </div>
+          <div id="settingsMenuList" class="settingsMenuList"></div>
+        </div>
+
+        <div id="settingsPanel" class="settingsPanel hidden" aria-hidden="true">
+          <div id="settingsPanelBackdrop" class="settingsPanelBackdrop"></div>
+          <div class="settingsPanelContent">
+            <div id="settingsPanelHeader" class="settingsPanelHeader">
+              <button id="settingsPanelBackBtn" class="btnIcon" type="button">
+                <span class="icon">arrow_back</span>
+              </button>
+              <div id="settingsPanelTitle" class="settingsPanelTitle">Настройки</div>
+            </div>
+            <div id="settingsPanelBody" class="settingsPanelBody">
+              <div id="settingsSectionsHost">
+                <div class="section" id="reportsSection">
+                  <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="field">
+                        <label>chat_id (куда отправлять)</label>
+                        <input id="setChatId" class="input" type="number" inputmode="numeric" placeholder="Напр. -100123..." />
+                      </div>
+                      <div class="grid2">
+                        <div class="field">
+                          <label>Время воскресного отчёта</label>
+                          <input id="setSundayTime" class="input" type="time" />
+                        </div>
+                        <div class="field">
+                          <label>Время ежедневного отчёта расходов</label>
+                          <input id="setDailyTime" class="input" type="time" />
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Ежедневный отчёт расходов</label>
+                        <select id="setDailyEnabled" class="input">
+                          <option value="0">Выключено</option>
+                          <option value="1">Включено</option>
+                        </select>
+                      </div>
+                      <button id="saveSettingsBtn" class="btn primary" type="button">
+                        <span class="icon">save</span> Сохранить отчёты
+                      </button>
+                      <div class="row" style="gap:10px; flex-wrap:wrap;">
+                        <button id="sendSundayNowBtn" class="btn small" type="button">
+                          <span class="icon">send</span> Воскресный отчёт сейчас
+                        </button>
+                        <button id="sendExpensesNowBtn" class="btn small" type="button">
+                          <span class="icon">send</span> Расходы сейчас
+                        </button>
+                        <button id="sendTestReportBtn" class="btn small" type="button">
+                          <span class="icon">check_circle</span> Тест отправки отчёта
+                        </button>
+                      </div>
+                      <div class="tiny muted2">Важно: chat_id должен быть установлен заранее.</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="section" id="monitorSection">
+                  <div class="sectionHeader">
+                    <h3>Мониторинг</h3>
+                    <button id="monitorRefreshBtn" class="btn small ghost" type="button">
+                      <span class="icon">refresh</span> Обновить
+                    </button>
+                  </div>
+                  <div id="monitorOverviewCard" class="card bigCard monitorOverview">
+                    <div class="grid2">
+                      <div class="miniStat">
+                        <div class="label">Ошибки за 24ч</div>
+                        <div id="monitorErrors24h" class="value">—</div>
+                      </div>
+                      <div class="miniStat">
+                        <div class="label">Fail доставки за 24ч</div>
+                        <div id="monitorDeliveries24h" class="value">—</div>
+                      </div>
+                    </div>
+                    <div id="monitorJobsBlock">
+                      <div class="spacer12"></div>
+                      <div class="tiny muted2">Последние запуски задач</div>
+                      <div id="monitorJobsOverview" class="list" style="margin-top:8px;"></div>
+                    </div>
+                  </div>
+
+
+                  <div class="spacer12"></div>
+                  <div class="tabs">
+                    <button id="tabMonErrors" class="tab active" type="button">Ошибки</button>
+                    <button id="tabMonJobs" class="tab" type="button">Задачи</button>
+                    <button id="tabMonDeliveries" class="tab" type="button">Доставка</button>
+                  </div>
+                  <div class="spacer12"></div>
+                  <div id="monitorList" class="list"></div>
+                  <div id="monitorEmpty" class="card bigCard hidden">
+                    <div class="bold">Пусто</div>
+                    <div class="tiny muted" style="margin-top:6px;">Нет данных для выбранного фильтра.</div>
+                  </div>
+                </div>
+
+
+                <div class="section" id="monthSection">
+                  <div class="sectionHeader"><h3>МНСП (текущий месяц)</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="field">
+                        <label>МНСП на месяц</label>
+                        <input id="setMonthlyMin" class="input" type="number" inputmode="decimal" placeholder="Напр. 41502.16" />
+                      </div>
+                      <div class="field">
+                        <label>Режим воскресений (4/5)</label>
+                        <select id="setSundaysOverride" class="input">
+                          <option value="">Авто (по календарю)</option>
+                          <option value="4">Вручную: 4</option>
+                          <option value="5">Вручную: 5</option>
+                        </select>
+                      </div>
+                      <div class="grid2">
+                        <div class="field">
+                          <label>Стартовый остаток</label>
+                          <input id="setStartBalance" class="input" type="number" inputmode="decimal" placeholder="0.00" />
+                        </div>
+                        <div class="field">
+                          <label>Часовой пояс</label>
+                          <input id="setTimezone" class="input" type="text" placeholder="Europe/Warsaw" />
+                        </div>
+                      </div>
+                      <button id="saveMonthSettingsBtn" class="btn primary" type="button">
+                        <span class="icon">tune</span> Сохранить месяц
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div class="section" id="monthCloseSection">
+                  <div class="sectionHeader"><h3>Закрытие месяца</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="rowBetween">
+                        <div class="bold" id="monthCloseStatus">—</div>
+                        <span id="monthCloseBadge" class="badge lock hidden">
+                          <span class="icon" style="font-size:18px">lock</span>
+                          Месяц закрыт
+                        </span>
+                      </div>
+                      <div id="monthCloseMeta" class="tiny muted2">—</div>
+                      <div class="row" style="gap:10px; flex-wrap:wrap;">
+                        <button id="closeMonthBtn" class="btn danger" type="button">
+                          <span class="icon">lock</span> Закрыть месяц
+                        </button>
+                        <button id="reopenMonthBtn" class="btn warn" type="button">
+                          <span class="icon">lock_open</span> Открыть месяц
+                        </button>
+                      </div>
+                      <div class="tiny muted2">Только администратор может закрывать или открывать месяц.</div>
+                    </div>
+                  </div>
+                </div>
+
+
+                <div class="section" id="themeSection">
+                  <div class="sectionHeader"><h3>Тема интерфейса</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="field">
+                        <label>Тема</label>
+                        <select id="setTheme" class="input">
+                          <option value="auto">Системная</option>
+                          <option value="light">Светлая</option>
+                          <option value="dark">Тёмная</option>
+                        </select>
+                      </div>
+                      <button id="saveThemeBtn" class="btn primary" type="button">
+                        <span class="icon">palette</span> Сохранить тему
+                      </button>
+                      <div class="tiny muted2">Изменение темы влияет на всех пользователей.</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="section" id="categoriesSection">
+                  <div class="sectionHeader">
+                    <h3>Категории</h3>
+                    <button id="addCategoryBtn" class="btn small" type="button">
+                      <span class="icon">add</span> Новая
+                    </button>
+                  </div>
+                  <div id="categoriesList" class="list"></div>
+                  <div id="categoriesEmpty" class="tiny muted2">Категорий пока нет.</div>
+                </div>
+
+                <div class="section" id="budgetSection">
+                  <div class="sectionHeader">
+                    <h3>Бюджет</h3>
+                    <button id="budgetAddRowBtn" class="btn small" type="button">
+                      <span class="icon">add</span> Добавить категорию
+                    </button>
+                  </div>
+                  <div class="card bigCard">
+                    <div id="budgetTable" class="budgetTable"></div>
+                    <div id="budgetEmpty" class="tiny muted2" style="margin-top:6px;">Лимитов пока нет.</div>
+                    <div class="spacer12"></div>
+                    <button id="saveBudgetBtn" class="btn primary" type="button">
+                      <span class="icon">save</span> Сохранить
+                    </button>
+                  </div>
+                </div>
+
+
+                <div class="section" id="templatesSection">
+                  <div class="sectionHeader"><h3>Шаблоны расходов (локально)</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="tiny muted2">Хранится в устройстве (localStorage). Можно быстро вводить расходы «в один тап».</div>
+                      <textarea id="templatesJson" class="input" rows="8" spellcheck="false"></textarea>
+                      <button id="saveTemplatesBtn" class="btn primary" type="button">
+                        <span class="icon">save</span> Сохранить шаблоны
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="section" id="exportSection">
+                  <div class="sectionHeader"><h3>Экспорт</h3></div>
+                  <div class="card bigCard">
+                    <div class="row" style="gap:10px; flex-wrap:wrap;">
+                      <button id="exportCsvBtn" class="btn" type="button">
+                        <span class="icon">download</span> Скачать CSV (месяц)
+                      </button>
+                      <button id="exportXlsxBtn" class="btn" type="button">
+                        <span class="icon">download</span> Скачать Excel (год)
+                      </button>
+                    </div>
+                    <div class="tiny muted2" style="margin-top:8px;">Откроется в браузере Telegram (скачивание зависит от клиента).</div>
+                  </div>
+                </div>
+
+                <div class="section" id="backupsSection">
+                  <div class="sectionHeader"><h3>Резервные копии</h3></div>
+                  <div class="card bigCard">
+                    <div class="form">
+                      <div class="row" style="gap:10px; flex-wrap:wrap;">
+                        <button id="backupDbBtn" class="btn" type="button">
+                          <span class="icon">database</span> Создать DB
+                        </button>
+                        <button id="backupFullBtn" class="btn" type="button">
+                          <span class="icon">archive</span> Создать FULL
+                        </button>
+                        <button id="backupRefreshBtn" class="btn small ghost" type="button">
+                          <span class="icon">refresh</span> Обновить
+                        </button>
+                      </div>
+                      <div class="spacer8"></div>
+                      <div id="backupDropdown" class="backupDropdown open">
+                        <button id="backupDropdownToggle" class="backupDropdownHeader" type="button" aria-expanded="true">
+                          <span>Список резервных копий <span id="backupCount" class="muted2">0</span></span>
+                          <span class="icon">expand_more</span>
+                        </button>
+                        <div class="backupDropdownBody">
+                          <div class="backupListScroll">
+                            <div id="backupList" class="list"></div>
+                            <div id="backupEmpty" class="tiny muted2">Бэкапов пока нет.</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="spacer12"></div>
+                      <div class="form">
+                        <label class="tiny muted2">Восстановить из файла</label>
+                        <div class="filePicker">
+                          <input id="backupRestoreInput" class="fileInput" type="file" accept=".sqlite3,.zip" />
+                          <label for="backupRestoreInput" class="btn ghost">Выбрать файл</label>
+                          <div class="filePickMeta">
+                            <div id="backupRestoreFileLabel" class="filePickName">Файл не выбран</div>
+                            <div class="filePickHint">.sqlite3 или .zip</div>
+                          </div>
+                        </div>
+                        <button id="backupRestoreBtn" class="btn danger" type="button" disabled>
+                          <span class="icon">restore</span> Восстановить
+                        </button>
+                        <div id="backupRestoreHint" class="tiny muted2">После выбора файла потребуется подтверждение.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+
+                <div class="section" id="usersSection">
+                  <div class="sectionHeader"><h3>Пользователи</h3></div>
+                  <div class="card bigCard">
+                    <div class="tiny muted2">Управление пользователями — через users.json (MVP). UI-редактор можно добавить позже.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Category name modal -->
+  <div id="categoryNameModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div id="categoryNameTitle" class="h">Новая категория</div>
+        <button id="closeCategoryNameModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="field">
+            <label>Название</label>
+            <input id="categoryNameInput" class="input" type="text" placeholder="Напр. Коммуналка" />
+          </div>
+          <button id="saveCategoryNameBtn" class="btn primary" type="button">
+            <span class="icon">save</span> Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category merge modal -->
+  <div id="categoryMergeModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Объединить категории</div>
+        <button id="closeCategoryMergeModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="field">
+            <label>Target категория</label>
+            <select id="mergeTargetSelect" class="input"></select>
+          </div>
+          <div class="field">
+            <label>Source категории</label>
+            <div id="mergeSources" class="chips"></div>
+          </div>
+          <div class="badge bad">
+            <span class="icon" style="font-size:16px;">warning</span>
+            операция изменит историю
+          </div>
+          <button id="mergeConfirmBtn" class="btn danger" type="button">
+            <span class="icon">merge_type</span> Объединить
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backup restore modal -->
+  <div id="backupRestoreModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Восстановление</div>
+        <button id="backupRestoreCloseBtn" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="badge bad">
+            <span class="icon" style="font-size:16px;">warning</span>
+            перезапишет текущие данные
+          </div>
+          <div id="backupRestoreFileName" class="tiny muted2" style="margin-top:8px;">Файл: —</div>
+          <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:12px;">
+            <button id="backupRestoreCancelBtn" class="btn ghost" type="button">
+              <span class="icon">close</span> Отмена
+            </button>
+            <button id="backupRestoreConfirmBtn" class="btn danger" type="button">
+              <span class="icon">restore</span> Подтвердить
+              <span id="backupRestoreSpinner" class="spinner hidden" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Month picker modal -->
+  <div id="monthModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Выбор месяца</div>
+        <button id="closeMonthModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="grid2">
+            <div class="field">
+              <label>Год</label>
+              <select id="yearSelect" class="input"></select>
+            </div>
+            <div class="field">
+              <label>Месяц</label>
+              <select id="monthSelect" class="input"></select>
+            </div>
+          </div>
+          <button id="applyMonthBtn" class="btn primary" type="button">
+            <span class="icon">check</span> Применить
+          </button>
+          <div class="tiny muted2">Если месяца нет в базе — создайте его (роль admin).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drafts modal -->
+  <div id="draftsModal" class="modalBackdrop draftModal">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Черновики</div>
+        <button id="closeDraftsModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div id="draftsList" class="draftList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tags picker modal -->
+  <div id="tagPickerModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div id="tagPickerTitle" class="h">Теги</div>
+        <button id="closeTagPickerModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div class="form">
+          <div class="field">
+            <label>Поиск</label>
+            <input id="tagSearchInput" class="input" type="text" placeholder="Найти тег" />
+          </div>
+          <div id="tagPickerList" class="list"></div>
+          <div class="row" style="gap:10px; flex-wrap:wrap;">
+            <button id="tagPickerDoneBtn" class="btn primary" type="button">
+              <span class="icon">check</span> Готово
+            </button>
+            <button id="tagPickerCreateBtn" class="btn" type="button">
+              <span class="icon">add</span> Создать тег
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit modal -->
+  <div id="editModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div id="editTitle" class="h">Детали</div>
+        <button id="closeEditModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div id="editBody" class="form"></div>
+        <div class="spacer12"></div>
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <button id="editSaveBtn" class="btn primary" type="button"><span class="icon">save</span> Сохранить</button>
+          <button id="editDeleteBtn" class="btn" type="button"><span class="icon">delete</span> Удалить</button>
+          <button id="editDuplicateBtn" class="btn" type="button"><span class="icon">content_copy</span> Дублировать</button>
+        </div>
+        <div id="editHint" class="tiny muted2" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attachment viewer modal -->
+  <div id="viewerModal" class="modalBackdrop viewerModal">
+    <div class="modal">
+      <div class="modalHeader">
+        <div id="viewerTitle" class="h">Чек/скан</div>
+        <button id="closeViewerModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div id="viewerContent" class="viewerContent"></div>
+        <div class="spacer12"></div>
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <button id="viewerDeleteBtn" class="btn" type="button"><span class="icon">delete</span> Удалить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monitor detail modal -->
+  <div id="monitorDetailModal" class="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="h">Детали</div>
+        <button id="closeMonitorDetailModal" class="btnIcon" type="button"><span class="icon">close</span></button>
+      </div>
+      <div class="modalBody">
+        <div id="monitorDetailContent"></div>
+        <div class="spacer12"></div>
+        <button id="copyMonitorDetailBtn" class="btn small" type="button">
+          <span class="icon">content_copy</span> Копировать
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+    <script src="/static/webapp.js"></script>
+</body>
+</html>
