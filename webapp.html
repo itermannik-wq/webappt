@@ -1336,6 +1336,10 @@
 
     .dropdown{
       position: relative;
+      z-index: 1;
+    }
+    .dropdown.open{
+      z-index: 5;
     }
     .dropdownTrigger{
       width: 100%;
@@ -1352,6 +1356,10 @@
       cursor: pointer;
       transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
       -webkit-tap-highlight-color: transparent;
+    }
+    .dropdown.open .dropdownTrigger{
+      border-color: rgba(16,185,129,.35);
+      box-shadow: 0 0 0 3px rgba(16,185,129,.12);
     }
     .dropdownTrigger:focus-visible{
       outline: none;
@@ -1385,7 +1393,7 @@
       overflow: hidden;
       pointer-events: none;
       transition: max-height .24s ease, opacity .18s ease, transform .18s ease;
-      z-index: 20;
+      z-index: 200;
     }
     .dropdown.open-up .dropdownPanel{
       top: auto;
@@ -2031,7 +2039,7 @@
             <span class="icon">add</span> Добавить
           </button>
         </div>
-        <div class="card bigCard">
+        <div class="card bigCard allowOverflow">
           <div class="chartWrap">
             <canvas id="sundayBar"></canvas>
           </div>
@@ -2323,7 +2331,14 @@
           <div class="grid2">
             <div class="field">
               <label>Месяц</label>
-              <select id="histMonthSelect" class="input"></select>
+              <div id="histMonthDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="histMonthSelect" class="input hiddenSelect" tabindex="-1" aria-hidden="true"></select>
             </div>
             <div class="field" id="histCatWrap">
               <label>Категория</label>
@@ -7347,6 +7362,7 @@
       initDropdownFromSelect("donIncomeType", "donIncomeTypeDropdown");
       initDropdownFromSelect("expCategory", "expCategoryDropdown");
       initDropdownFromSelect("expTemplate", "expTemplateDropdown");
+      initDropdownFromSelect("histMonthSelect", "histMonthDropdown");
       initDropdownFromSelect("histCategorySelect", "histCategoryDropdown");
       initDropdownFromSelect("periodYearSelect", "periodYearDropdown");
       initDropdownFromSelect("periodMonthSelect", "periodMonthDropdown");
