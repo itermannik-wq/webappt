@@ -351,6 +351,72 @@
     .collectionCard.expanded .collectionChevron{
       transform: rotate(180deg);
     }
+    .segmented{
+      display: inline-flex;
+      gap: 6px;
+      padding: 4px;
+      border-radius: 999px;
+      background: var(--card2);
+      border: 1px solid var(--stroke);
+    }
+    .segBtn{
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background .12s ease, color .12s ease;
+    }
+    .segBtn.active{
+      background: var(--card);
+      color: var(--text);
+    }
+    .deltaBadge{
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(255,255,255,.08);
+      color: var(--muted);
+    }
+    .deltaBadge.positive{
+      background: rgba(16,185,129,.18);
+      color: var(--accent2);
+    }
+    .deltaBadge.negative{
+      background: rgba(239,68,68,.18);
+      color: #fecaca;
+    }
+    .deltaBadge.neutral{
+      background: rgba(255,255,255,.08);
+      color: var(--muted);
+    }
+    .periodSelectors{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .periodTopList{
+      display: grid;
+      gap: 8px;
+    }
+    .periodTopItem{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: var(--card2);
+      border: 1px solid var(--stroke);
+      font-size: 12px;
+    }
     .categoryCard .collectionToggle{
       gap: 10px;
       flex-wrap: wrap;
@@ -1489,6 +1555,21 @@
             </div>
           </div>
         </div>
+
+            <div class="card bigCard" style="margin-top:12px;">
+              <div class="grid2">
+                <div>
+                  <div class="small muted">Хорошие месяцы</div>
+                  <div id="goodMonths" class="chips"></div>
+                </div>
+                <div>
+                  <div class="small muted">Плохие месяцы</div>
+                  <div id="badMonths" class="chips"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="section">
@@ -2428,6 +2509,11 @@
       expenses: [],
       monthBudgets: [],
       yearAnalytics: null,
+      periodAnalytics: null,
+      periodType: "month",
+      periodYear: null,
+      periodMonth: null,
+      periodQuarter: null,
 
       sundayDates: [],
       sundayIndex: 0,
@@ -2438,6 +2524,7 @@
         expensePie: null,
         yearLine: null,
         yearBalanceBar: null,
+        periodMini: null,
       },
 
       historyMode: "don", // don|exp
@@ -3087,6 +3174,10 @@
       return {y:d.getFullYear(), m:d.getMonth()+1, d:d.getDate()};
     }
 
+    function quarterFromMonth(month){
+      return Math.floor((Number(month || 1) - 1) / 3) + 1;
+    }
+
     function computeSundays(y, m){
       // JS Date: month 0..11
       const sundays = [];
@@ -3119,6 +3210,18 @@
     async function loadYearAnalytics(){
       const data = await API.get(`/api/analytics/year?year=${encodeURIComponent(State.year)}`);
       State.yearAnalytics = data;
+    }
+
+    async function loadPeriodAnalytics(){
+      const type = State.periodType || "month";
+      const year = Number(State.periodYear || State.year);
+      const month = Number(State.periodMonth || State.month);
+      const quarter = Number(State.periodQuarter || quarterFromMonth(month));
+      const params = new URLSearchParams({ type, year: String(year) });
+      if (type === "month") params.set("month", String(month));
+      if (type === "quarter") params.set("quarter", String(quarter));
+      const data = await API.get(`/api/analytics/period?${params.toString()}`);
+      State.periodAnalytics = data;
     }
 
     async function loadTags(){
@@ -3208,11 +3311,13 @@
       await loadTags();
       await loadCategories();
       await loadYearAnalytics();
+      await loadPeriodAnalytics();
       refreshSundayDates();
       if (!State.monthId) {
         // clear UI
         renderEmptyMonth();
         renderYearAnalytics();
+        renderPeriodSummary();
         updateDonationDateUI();
         updateAttachmentControls();
         renderDraftsCard();
@@ -3284,10 +3389,12 @@
       try { State.charts.expensePie?.destroy(); } catch {}
       try { State.charts.yearLine?.destroy(); } catch {}
       try { State.charts.yearBalanceBar?.destroy(); } catch {}
+      try { State.charts.periodMini?.destroy(); } catch {}
       State.charts.sundayBar = null;
       State.charts.expensePie = null;
       State.charts.yearLine = null;
       State.charts.yearBalanceBar = null;
+      State.charts.periodMini = null;
     }
 
     function setBudgetCollectionExpanded(expanded){
@@ -3341,6 +3448,7 @@
     function renderDashboard(){
       const s = State.summary;
       renderYearAnalytics();
+      renderPeriodSummary();
       if (!s) return;
 
       $("#mIncome").textContent = fmtMoney(s.month_income_sum);
@@ -3414,6 +3522,120 @@
       }
     }
 
+    function renderPeriodSummary(){
+      const p = State.periodAnalytics;
+      const card = $("#periodCollection");
+      if (!p || !p.totals || !p.period) {
+        renderPeriodEmpty();
+        return;
+      }
+
+      const periodLabel = p.period.type === "month"
+        ? "Месяц"
+        : (p.period.type === "quarter" ? "Квартал" : "Год");
+      $("#periodMeta").textContent = `${periodLabel} • ${p.period.start} — ${p.period.end}`;
+      $("#periodIncomeValue").textContent = fmtMoney(p.totals.income);
+      $("#periodExpensesValue").textContent = fmtMoney(p.totals.expenses);
+      $("#periodNetValue").textContent = fmtMoney(p.totals.net);
+
+      formatDeltaBadge($("#periodIncomeDelta"), p.delta?.income_pct, true);
+      formatDeltaBadge($("#periodExpensesDelta"), p.delta?.expenses_pct, false);
+      formatDeltaBadge($("#periodNetDelta"), p.delta?.net_pct, true);
+
+      const canSeeTop = State.role === "admin" || State.role === "accountant";
+      const topCard = $("#periodTopExpensesCard");
+      if (topCard) topCard.classList.toggle("hidden", !canSeeTop);
+      if (canSeeTop) {
+        renderPeriodTopExpenses(p.top_expenses_by_category || []);
+      }
+
+      const isExpanded = card?.classList.contains("expanded");
+      if (isExpanded) {
+        renderPeriodMiniChart(p.totals);
+      } else {
+        try { State.charts.periodMini?.destroy(); } catch {}
+        State.charts.periodMini = null;
+      }
+    }
+
+    function renderPeriodTopExpenses(items){
+      const wrap = $("#periodTopExpenses");
+      if (!wrap) return;
+      wrap.innerHTML = "";
+      if (!items.length) {
+        wrap.innerHTML = `<div class="tiny muted">Нет данных</div>`;
+        return;
+      }
+      items.forEach((item)=>{
+        const row = document.createElement("div");
+        row.className = "periodTopItem";
+        row.innerHTML = `
+          <div class="small">${escapeHtml(item.category || "—")}</div>
+          <div class="bold mono">${fmtMoney(item.sum || 0)}</div>
+        `;
+        wrap.appendChild(row);
+      });
+    }
+
+    function renderPeriodMiniChart(totals){
+      const income = Number(totals?.income || 0);
+      const expenses = Number(totals?.expenses || 0);
+      const styles = getComputedStyle(document.documentElement);
+      const accent = styles.getPropertyValue("--accent").trim() || "#10b981";
+      const danger = styles.getPropertyValue("--danger").trim() || "#ef4444";
+      const muted = styles.getPropertyValue("--muted").trim();
+      const stroke = styles.getPropertyValue("--stroke").trim();
+
+      try { State.charts.periodMini?.destroy(); } catch {}
+      const ctx = $("#periodMiniChart").getContext("2d");
+      State.charts.periodMini = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: ["Доход", "Расход"],
+          datasets: [{
+            data: [income, expenses],
+            backgroundColor: [accent, danger],
+            borderRadius: 10,
+            borderWidth: 0,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 700 },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx)=> ` ${fmtMoney(ctx.raw)}`
+              }
+            }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: muted } },
+            y: { beginAtZero: true, grid: { color: stroke }, ticks: { color: muted } }
+          }
+        }
+      });
+    }
+
+    function renderPeriodEmpty(){
+      $("#periodMeta").textContent = "—";
+      $("#periodIncomeValue").textContent = "—";
+      $("#periodExpensesValue").textContent = "—";
+      $("#periodNetValue").textContent = "—";
+      formatDeltaBadge($("#periodIncomeDelta"), null, true);
+      formatDeltaBadge($("#periodExpensesDelta"), null, false);
+      formatDeltaBadge($("#periodNetDelta"), null, true);
+      const canSeeTop = State.role === "admin" || State.role === "accountant";
+      const topCard = $("#periodTopExpensesCard");
+      if (topCard) topCard.classList.toggle("hidden", !canSeeTop);
+      const topWrap = $("#periodTopExpenses");
+      if (topWrap) topWrap.innerHTML = `<div class="tiny muted">Нет данных</div>`;
+      try { State.charts.periodMini?.destroy(); } catch {}
+      State.charts.periodMini = null;
+    }
+
     function renderYearEmpty(){
       $("#yearMeta").textContent = "—";
       $("#yIncome").textContent = "—";
@@ -3427,6 +3649,27 @@
       State.charts.yearLine = null;
       State.charts.yearBalanceBar = null;
     }
+
+    function formatDeltaBadge(el, pct, positiveGood){
+      if (!el) return;
+      el.classList.remove("positive", "negative", "neutral");
+      if (typeof pct !== "number" || !isFinite(pct)){
+        el.textContent = "—";
+        el.classList.add("neutral");
+        return;
+      }
+      const value = pct * 100;
+      const formatted = `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+      el.textContent = formatted;
+      if (value === 0){
+        el.classList.add("neutral");
+      } else if ((value > 0 && positiveGood) || (value < 0 && !positiveGood)){
+        el.classList.add("positive");
+      } else {
+        el.classList.add("negative");
+      }
+    }
+
 
     function renderYearChips(good, bad){
       const goodWrap = $("#goodMonths");
@@ -4435,6 +4678,16 @@
       if (expanded) renderYearAnalytics();
     }
 
+    function setPeriodCollectionExpanded(expanded){
+      const card = $("#periodCollection");
+      const toggle = $("#periodCollectionToggle");
+      if (!card || !toggle) return;
+      card.classList.toggle("expanded", expanded);
+      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      if (expanded) renderPeriodSummary();
+    }
+
+
     /**********************
      * Navigation + tabs
      **********************/
@@ -5357,8 +5610,82 @@
       if (!State.monthId) {
         await loadLatestMonthFallback();
       }
+      if (State.periodType === "month") {
+        State.periodYear = State.year;
+        State.periodMonth = State.month;
+      } else if (State.periodType === "quarter") {
+        State.periodYear = State.year;
+        State.periodQuarter = quarterFromMonth(State.month);
+      } else {
+        State.periodYear = State.year;
+      }
+      rebuildPeriodSelectors();
       await refreshAll();
       closeMonthModal();
+    }
+
+    function rebuildPeriodSelectors(){
+      const yearSelect = $("#periodYearSelect");
+      const monthSelect = $("#periodMonthSelect");
+      const quarterSelect = $("#periodQuarterSelect");
+      if (!yearSelect || !monthSelect || !quarterSelect) return;
+
+      const baseYear = Number(State.year || new Date().getFullYear());
+      const years = new Set([baseYear - 1, baseYear, baseYear + 1, State.periodYear].filter(Boolean));
+      const yearList = Array.from(years).filter((y)=> y && y > 1900).sort((a,b)=>a-b);
+
+      yearSelect.innerHTML = "";
+      yearList.forEach((y)=>{
+        const opt = document.createElement("option");
+        opt.value = String(y);
+        opt.textContent = String(y);
+        yearSelect.appendChild(opt);
+      });
+
+      monthSelect.innerHTML = "";
+      for (let i = 1; i <= 12; i++){
+        const opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = monthNameRu(i);
+        monthSelect.appendChild(opt);
+      }
+
+      quarterSelect.innerHTML = "";
+      for (let i = 1; i <= 4; i++){
+        const opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = `Q${i}`;
+        quarterSelect.appendChild(opt);
+      }
+
+      yearSelect.value = String(State.periodYear || baseYear);
+      monthSelect.value = String(State.periodMonth || State.month || 1);
+      quarterSelect.value = String(State.periodQuarter || quarterFromMonth(State.periodMonth || State.month || 1));
+      updatePeriodSelectorsVisibility();
+      updatePeriodSegmentUI();
+    }
+
+    function updatePeriodSelectorsVisibility(){
+      $("#periodMonthWrap")?.classList.toggle("hidden", State.periodType !== "month");
+      $("#periodQuarterWrap")?.classList.toggle("hidden", State.periodType !== "quarter");
+    }
+
+    function updatePeriodSegmentUI(){
+      $$("#periodTypeSegments .segBtn").forEach((btn)=>{
+        btn.classList.toggle("active", btn.dataset.type === State.periodType);
+      });
+    }
+
+    async function applyPeriodSelection(){
+      State.periodYear = Number($("#periodYearSelect").value || State.year);
+      if (State.periodType === "month") {
+        State.periodMonth = Number($("#periodMonthSelect").value || State.month);
+      }
+      if (State.periodType === "quarter") {
+        State.periodQuarter = Number($("#periodQuarterSelect").value || quarterFromMonth(State.month));
+      }
+      await loadPeriodAnalytics();
+      renderPeriodSummary();
     }
 
     /**********************
@@ -5433,10 +5760,35 @@
         const isExpanded = $("#yearCollection").classList.contains("expanded");
         setYearCollectionExpanded(!isExpanded);
       });
+      $("#periodCollectionToggle").addEventListener("click", ()=>{
+        const isExpanded = $("#periodCollection").classList.contains("expanded");
+        setPeriodCollectionExpanded(!isExpanded);
+      });
+
       $("#budgetToggle").addEventListener("click", ()=>{
         const isExpanded = $("#budgetCollection").classList.contains("expanded");
         setBudgetCollectionExpanded(!isExpanded);
       });
+
+      $("#periodTypeSegments").addEventListener("click", async (e)=>{
+        const btn = e.target.closest(".segBtn");
+        if (!btn) return;
+        const nextType = btn.dataset.type;
+        if (!nextType || nextType === State.periodType) return;
+        State.periodType = nextType;
+        updatePeriodSegmentUI();
+        updatePeriodSelectorsVisibility();
+        if (State.periodType === "month") {
+          State.periodMonth = Number($("#periodMonthSelect").value || State.month);
+        } else if (State.periodType === "quarter") {
+          State.periodQuarter = Number($("#periodQuarterSelect").value || quarterFromMonth(State.month));
+        }
+        await applyPeriodSelection();
+      });
+      $("#periodYearSelect").addEventListener("change", async ()=>{ await applyPeriodSelection(); });
+      $("#periodMonthSelect").addEventListener("change", async ()=>{ await applyPeriodSelection(); });
+      $("#periodQuarterSelect").addEventListener("change", async ()=>{ await applyPeriodSelection(); });
+
 
       // add tabs
       $("#tabDonation").addEventListener("click", ()=> setAddTab("don"));
@@ -5732,6 +6084,10 @@
       State.year = t.y;
       State.month = t.m;
       setMonthTitle();
+      State.periodType = "month";
+      State.periodYear = State.year;
+      State.periodMonth = State.month;
+      State.periodQuarter = quarterFromMonth(State.month);
       State.otherIncomeDate = `${t.y}-${String(t.m).padStart(2,"0")}-${String(t.d).padStart(2,"0")}`;
 
       wireEvents();
@@ -5766,6 +6122,7 @@
       await loadMonthsForYear(State.year);
       await ensureSelectedMonthExists();
       setMonthTitle();
+      rebuildPeriodSelectors();
 
       // prefill expense date + totals
       setExpenseToday();
