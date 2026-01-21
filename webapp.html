@@ -91,6 +91,12 @@
       gap: 10px;
       margin-bottom: 12px;
     }
+    .monthClosedRow{
+      display:flex;
+      align-items:center;
+      justify-content:flex-start;
+      margin: -6px 0 12px;
+    }
     .monthTitle{
       display:flex;
       align-items:center;
@@ -1326,10 +1332,6 @@
           <span id="monthTitle" class="title">—</span>
           <span class="icon" style="font-size:20px;color:var(--muted)">expand_more</span>
         </button>
-        <span id="monthClosedBadge" class="badge lock hidden">
-          <span class="icon" style="font-size:18px">lock</span>
-          Месяц закрыт
-        </span>
       </div>
       <div class="row" style="gap:10px;">
         <button id="refreshBtn" class="btnIcon" type="button" aria-label="Обновить">
@@ -1337,6 +1339,12 @@
         </button>
         <span id="roleBadge" class="badge">роль: —</span>
       </div>
+    </div>
+    <div class="monthClosedRow">
+      <span id="monthClosedBadge" class="badge lock hidden">
+        <span class="icon" style="font-size:18px">lock</span>
+        Месяц закрыт
+      </span>
     </div>
 
     <!-- SCREEN: DASHBOARD -->
