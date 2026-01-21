@@ -792,10 +792,15 @@
     }
     .backupItem{
       display:flex;
-      align-items:center;
+      align-items:flex-start;
       justify-content:space-between;
       gap: 12px;
       animation: backupFade .22s ease;
+      padding: 12px;
+      border-radius: 16px;
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      box-shadow: var(--shadow);
     }
     .backupItem.highlight{
       animation: backupFade .22s ease, backupHighlight 1s ease;
@@ -809,10 +814,121 @@
     .backupMeta .title{
       font-weight: 700;
       font-size: 14px;
+      line-height: 1.25;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .backupMeta .subtitle{
       font-size: 12px;
       color: var(--muted);
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .backupDownloadBtn{
+      flex: 0 0 auto;
+    }
+    .backupDropdown{
+      border-radius: 16px;
+      border: 1px solid var(--stroke);
+      background: var(--card);
+      overflow: hidden;
+    }
+    .backupDropdownHeader{
+      width: 100%;
+      border: none;
+      background: transparent;
+      padding: 12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      color: var(--text);
+      font-weight: 650;
+      cursor: pointer;
+      transition: background .18s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .backupDropdownHeader:active{
+      background: rgba(255,255,255,.04);
+    }
+    .backupDropdownHeader .muted2{
+      font-size: 12px;
+    }
+    .backupDropdownHeader .icon{
+      transition: transform .22s ease;
+    }
+    .backupDropdown.open .backupDropdownHeader .icon{
+      transform: rotate(180deg);
+    }
+    .backupDropdownBody{
+      max-height: 0;
+      opacity: 0;
+      overflow: hidden;
+      transform: translateY(-6px);
+      transition: max-height .28s ease, opacity .2s ease, transform .28s ease;
+    }
+    .backupDropdown.open .backupDropdownBody{
+      max-height: 320px;
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .backupListScroll{
+      max-height: 280px;
+      overflow-y: auto;
+      padding: 8px 10px 12px;
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+    }
+    .backupListScroll::-webkit-scrollbar{
+      width: 6px;
+    }
+    .backupListScroll::-webkit-scrollbar-thumb{
+      background: rgba(255,255,255,.12);
+      border-radius: 99px;
+    }
+    .backupListScroll::-webkit-scrollbar-track{
+      background: transparent;
+    }
+    .filePicker{
+      position: relative;
+      display:flex;
+      align-items:center;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid var(--stroke);
+      background: var(--card);
+    }
+    .fileInput{
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+      width: 0;
+      height: 0;
+    }
+    .filePickMeta{
+      min-width: 0;
+      display:flex;
+      flex-direction:column;
+      gap: 4px;
+    }
+    .filePickName{
+      font-weight: 600;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    .filePickHint{
+      font-size: 12px;
+      color: var(--muted2);
     }
     @keyframes backupFade{ from{opacity:0; transform: translateY(4px);} to{opacity:1; transform: translateY(0);} }
     @keyframes backupHighlight{ 0%{ background: var(--card2);} 100%{ background: var(--card);} }
@@ -2228,12 +2344,29 @@
                 </button>
               </div>
               <div class="spacer8"></div>
-              <div id="backupList" class="list"></div>
-              <div id="backupEmpty" class="tiny muted2">Бэкапов пока нет.</div>
+              <div id="backupDropdown" class="backupDropdown open">
+                <button id="backupDropdownToggle" class="backupDropdownHeader" type="button" aria-expanded="true">
+                  <span>Список резервных копий <span id="backupCount" class="muted2">0</span></span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="backupDropdownBody">
+                  <div class="backupListScroll">
+                    <div id="backupList" class="list"></div>
+                    <div id="backupEmpty" class="tiny muted2">Бэкапов пока нет.</div>
+                  </div>
+                </div>
+              </div>
               <div class="spacer12"></div>
               <div class="form">
                 <label class="tiny muted2">Восстановить из файла</label>
-                <input id="backupRestoreInput" class="input" type="file" accept=".sqlite3,.zip" />
+                <div class="filePicker">
+                  <input id="backupRestoreInput" class="fileInput" type="file" accept=".sqlite3,.zip" />
+                  <label for="backupRestoreInput" class="btn ghost">Выбрать файл</label>
+                  <div class="filePickMeta">
+                    <div id="backupRestoreFileLabel" class="filePickName">Файл не выбран</div>
+                    <div class="filePickHint">.sqlite3 или .zip</div>
+                  </div>
+                </div>
                 <button id="backupRestoreBtn" class="btn danger" type="button" disabled>
                   <span class="icon">restore</span> Восстановить
                 </button>
@@ -5465,10 +5598,12 @@
     function renderBackupList(){
       const list = $("#backupList");
       const empty = $("#backupEmpty");
+      const count = $("#backupCount");
       if (!list || !empty) return;
       list.innerHTML = "";
       const items = State.backupItems || [];
       empty.classList.toggle("hidden", items.length > 0);
+      if (count) count.textContent = String(items.length);
       const known = State.backupKnownNames || new Set();
       const isInitial = known.size === 0;
       items.forEach((item)=>{
@@ -6420,10 +6555,18 @@
         if (State.role !== "admin") return;
         await loadBackups();
       });
+      $("#backupDropdownToggle").addEventListener("click", ()=>{
+        const dropdown = $("#backupDropdown");
+        if (!dropdown) return;
+        const isOpen = dropdown.classList.toggle("open");
+        $("#backupDropdownToggle").setAttribute("aria-expanded", String(isOpen));
+      });
       $("#backupRestoreInput").addEventListener("change", (e)=>{
         const file = e.target.files && e.target.files[0];
         State.backupRestoreFile = file || null;
         $("#backupRestoreBtn").disabled = !file;
+        const label = $("#backupRestoreFileLabel");
+        if (label) label.textContent = file ? file.name : "Файл не выбран";
       });
       $("#backupRestoreBtn").addEventListener("click", ()=>{
         if (!State.backupRestoreFile) return;
