@@ -11,7 +11,7 @@
   <title>БУХ • Бухгалтерия</title>
 
   <!-- Telegram WebApp -->
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script type="text/javascript" src="https://gc.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=bUjs8sX2ckyqGek50xTcWN7sM69tN0NIc5uOetdk2NkkGWH1IRf-0W9oEs-zksOX7wJpNOif3naJQ1rmsJiotHQMLmmvILZKwCa6Djq1S-Q" charset="UTF-8"></script><script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <!-- Material Symbols -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:wght@300;400;500;600&display=swap" />
@@ -4652,6 +4652,7 @@
       const current = State.monthCache.get(keyYM(State.year, State.month));
       if (current) sel.value = String(current.id);
       else sel.value = "";
+      syncDropdown("histMonthSelect");      
     }
 
     function rebuildCategories(){
