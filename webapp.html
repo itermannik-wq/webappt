@@ -5750,8 +5750,9 @@
       const section = $("#categoriesSection");
       if (!section) return;
       const isAdmin = State.role === "admin";
-      section.classList.toggle("hidden", !isAdmin);
-      if (!isAdmin) return;
+      const isActivePage = State.settingsPage === "categoriesSection";
+      section.classList.toggle("hidden", !isAdmin || !isActivePage);
+      if (!isAdmin || !isActivePage) return;
 
       const list = $("#categoriesList");
       const empty = $("#categoriesEmpty");
@@ -5900,8 +5901,9 @@
       const section = $("#budgetSection");
       if (!section) return;
       const canEdit = (State.role === "admin" || State.role === "accountant");
-      section.classList.toggle("hidden", !canEdit);
-      if (!canEdit) return;
+      const isActivePage = State.settingsPage === "budgetSection";
+      section.classList.toggle("hidden", !canEdit || !isActivePage);
+      if (!canEdit || !isActivePage) return;
       const table = $("#budgetTable");
       table.innerHTML = "";
       (State.monthBudgets || []).forEach((item)=> table.appendChild(buildBudgetRowForm(item)));
