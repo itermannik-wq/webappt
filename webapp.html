@@ -750,6 +750,66 @@
       transform: translateY(0) scale(1);
       pointer-events: auto;
     }
+    .roleSwitcherHeader{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px 8px;
+      border-bottom: 1px solid var(--stroke);
+    }
+    .roleSwitcherHeaderInfo{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .roleSwitcherAvatar{
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: 1px solid var(--stroke);
+      background: rgba(255,255,255,.08);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      text-transform: uppercase;
+    }
+    .roleSwitcherAvatar img{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .roleSwitcherAvatarBtn{
+      border-radius: 12px;
+      padding: 6px 10px;
+      font-size: 12px;
+      border: 1px solid var(--stroke);
+      background: var(--card2);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: transform .18s ease, background .18s ease;
+    }
+    .roleSwitcherAvatarBtn:active{
+      transform: translateY(1px);
+    }
+    .roleSwitcherTitle{
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .roleSwitcherSubtitle{
+      font-size: 11px;
+      color: var(--muted2);
+    }
     .roleSwitcherList{
       display: flex;
       flex-direction: column;
@@ -777,6 +837,31 @@
     .roleSwitcherItem.active{
       background: rgba(16,185,129,.16);
       border-color: rgba(16,185,129,.35);
+    }
+    .roleSwitcherItemMain{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .roleSwitcherItemAvatar{
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 1px solid var(--stroke);
+      background: rgba(255,255,255,.08);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text);
+      text-transform: uppercase;
+    }
+    .roleSwitcherItemAvatar img{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
     .roleSwitcherName{
       font-size: 13px;
@@ -1949,6 +2034,7 @@
             <span class="icon">expand_more</span>
           </button>
           <div id="roleSwitcherPanel" class="roleSwitcherPanel" role="listbox"></div>
+          <input id="roleAvatarInput" type="file" class="hidden" accept="image/*" />
         </div>
         <span id="roleBadge" class="badge">роль: —</span>
       </div>
@@ -4741,6 +4827,61 @@
       $("#roleSwitcherBtn")?.setAttribute("aria-expanded", String(isOpen));
     }
 
+    const RoleAvatars = {
+      prefix: "role_avatar_"
+    };
+
+    function getRoleAvatarKey(userId){
+      if (!userId) return null;
+      return `${RoleAvatars.prefix}${userId}`;
+    }
+
+    function getUserInitials(name){
+      const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+      if (!parts.length) return "—";
+      const first = parts[0][0] || "";
+      const second = parts.length > 1 ? parts[1][0] : "";
+      return (first + second).toUpperCase();
+    }
+
+    function getUserAvatarData(userId){
+      const key = getRoleAvatarKey(userId);
+      if (!key) return null;
+      try{
+        return localStorage.getItem(key);
+      }catch(e){
+        return null;
+      }
+    }
+
+    function setUserAvatarData(userId, dataUrl){
+      const key = getRoleAvatarKey(userId);
+      if (!key) return;
+      try{
+        localStorage.setItem(key, dataUrl);
+      }catch(e){
+        console.warn("Unable to save avatar", e);
+      }
+    }
+
+    function readFileAsDataUrl(file){
+      return new Promise((resolve, reject)=>{
+        const reader = new FileReader();
+        reader.onload = ()=> resolve(String(reader.result || ""));
+        reader.onerror = ()=> reject(new Error("read_error"));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function buildAvatarMarkup(userId, name, fallbackClass){
+      const avatar = getUserAvatarData(userId);
+      if (avatar){
+        return `<img src="${escapeHtml(avatar)}" alt="Аватар ${escapeHtml(name)}" />`;
+      }
+      return `<span class="${fallbackClass}">${escapeHtml(getUserInitials(name))}</span>`;
+    }
+
+
     function renderRoleSwitcherPanel(){
       const panel = $("#roleSwitcherPanel");
       if (!panel) return;
@@ -4748,6 +4889,40 @@
       if (!RoleSwitcher.users.length){
         panel.innerHTML = `<div class="roleSwitcherEmpty">Пользователи не найдены.</div>`;
         return;
+      }
+      const activeUser = RoleSwitcher.users.find((user)=> user?.telegram_id === RoleSwitcher.activeUserId) || RoleSwitcher.users[0];
+      if (activeUser && !RoleSwitcher.activeUserId){
+        RoleSwitcher.activeUserId = activeUser.telegram_id;
+      }
+      if (activeUser){
+        const name = (activeUser?.name || "").trim() || "Пользователь";
+        const role = activeUser?.role || "viewer";
+        const header = document.createElement("div");
+        header.className = "roleSwitcherHeader";
+        header.innerHTML = `
+          <div class="roleSwitcherHeaderInfo">
+            <div class="roleSwitcherAvatar">
+              ${buildAvatarMarkup(activeUser?.telegram_id, name, "roleSwitcherAvatarFallback")}
+            </div>
+            <div style="min-width:0;">
+              <div class="roleSwitcherTitle">${escapeHtml(name)}</div>
+              <div class="roleSwitcherSubtitle">${escapeHtml(getRoleLabel(role))}</div>
+            </div>
+          </div>
+          <button class="roleSwitcherAvatarBtn" type="button">
+            <span class="icon" style="font-size:16px;">photo_camera</span>
+            Добавить
+          </button>
+        `;
+        const btn = header.querySelector(".roleSwitcherAvatarBtn");
+        btn?.addEventListener("click", ()=>{
+          const input = $("#roleAvatarInput");
+          if (!input) return;
+          input.dataset.userId = String(activeUser?.telegram_id || "");
+          input.value = "";
+          input.click();
+        });
+        panel.appendChild(header);
       }
       const list = document.createElement("div");
       list.className = "roleSwitcherList";
@@ -4761,9 +4936,14 @@
         btn.dataset.userId = String(userId || "");
         btn.style.transitionDelay = `${idx * 30}ms`;
         btn.innerHTML = `
-          <div>
-            <div class="roleSwitcherName">${escapeHtml(name)}</div>
-            <div class="roleSwitcherMeta">${escapeHtml(getRoleLabel(role))}</div>
+          <div class="roleSwitcherItemMain">
+            <div class="roleSwitcherItemAvatar">
+              ${buildAvatarMarkup(userId, name, "roleSwitcherItemAvatarFallback")}
+            </div>
+            <div>
+              <div class="roleSwitcherName">${escapeHtml(name)}</div>
+              <div class="roleSwitcherMeta">${escapeHtml(getRoleLabel(role))}</div>
+            </div>
           </div>
           <span class="icon">${userId === RoleSwitcher.activeUserId ? "done" : "person"}</span>
         `;
@@ -7305,13 +7485,29 @@
           setToast("Обновлено");
         }catch(e){ alert(String(e.message||e)); }
       });
-      $("#monthBtn").addEventListener("click", openMonthModal);
-      $("#roleSwitcherBtn")?.addEventListener("click", (e)=>{
-        e.stopPropagation();
-        setRoleSwitcherOpen(!RoleSwitcher.open);
-      });
-      $("#roleSwitcherPanel")?.addEventListener("click", (e)=>{
-        e.stopPropagation();
+      $("#roleAvatarInput")?.addEventListener("change", async (e)=>{
+        const input = e.currentTarget;
+        const file = input?.files?.[0];
+        const userId = input?.dataset?.userId;
+        if (!file || !userId) return;
+        if (!file.type.startsWith("image/")){
+          setToast("Нужен файл изображения");
+          return;
+        }
+        if (file.size > 2 * 1024 * 1024){
+          setToast("Файл слишком большой");
+          return;
+        }
+        try{
+          const dataUrl = await readFileAsDataUrl(file);
+          if (!dataUrl) throw new Error("empty");
+          setUserAvatarData(userId, dataUrl);
+          renderRoleSwitcherPanel();
+          setToast("Аватар обновлён");
+        }catch(e2){
+          console.warn(e2);
+          setToast("Не удалось загрузить");
+        }
       });
       document.addEventListener("click", (e)=>{
         const wrap = $("#roleSwitcher");
