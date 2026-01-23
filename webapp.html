@@ -712,6 +712,31 @@
       transition: transform .18s ease, background .18s ease, box-shadow .18s ease;
       -webkit-tap-highlight-color: transparent;
     }
+    .roleSwitcherBtnAvatar{
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1px solid var(--stroke);
+      background: rgba(255,255,255,.08);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text);
+      text-transform: uppercase;
+    }
+    .roleSwitcherBtnAvatar img{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .roleSwitcherBtnAvatarFallback{
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+    }
     .roleSwitcherBtn .icon{
       font-size: 18px;
       color: var(--muted2);
@@ -2030,6 +2055,7 @@
         </button>
         <div id="roleSwitcher" class="roleSwitcher hidden">
           <button id="roleSwitcherBtn" class="roleSwitcherBtn" type="button" aria-expanded="false">
+            <span id="roleSwitcherAvatar" class="roleSwitcherBtnAvatar" aria-hidden="true"></span>
             <span id="roleSwitcherLabel">роль: —</span>
             <span class="icon">expand_more</span>
           </button>
@@ -4811,6 +4837,7 @@
       if (badge) badge.textContent = label;
       const switcherLabel = $("#roleSwitcherLabel");
       if (switcherLabel) switcherLabel.textContent = label;
+      updateRoleSwitcherAvatar(user);
     }
 
     function updateRoleSwitcherVisibility(){
@@ -4881,6 +4908,13 @@
       return `<span class="${fallbackClass}">${escapeHtml(getUserInitials(name))}</span>`;
     }
 
+    function updateRoleSwitcherAvatar(user){
+      const avatarWrap = $("#roleSwitcherAvatar");
+      if (!avatarWrap) return;
+      const name = (user?.name || "").trim() || "Пользователь";
+      const userId = user?.telegram_id || RoleSwitcher.activeUserId;
+      avatarWrap.innerHTML = buildAvatarMarkup(userId, name, "roleSwitcherBtnAvatarFallback");
+    }
 
     function renderRoleSwitcherPanel(){
       const panel = $("#roleSwitcherPanel");
@@ -4897,6 +4931,7 @@
       if (activeUser){
         const name = (activeUser?.name || "").trim() || "Пользователь";
         const role = activeUser?.role || "viewer";
+        updateRoleSwitcherAvatar(activeUser);
         const header = document.createElement("div");
         header.className = "roleSwitcherHeader";
         header.innerHTML = `
@@ -7511,6 +7546,7 @@
           if (!dataUrl) throw new Error("empty");
           setUserAvatarData(userId, dataUrl);
           renderRoleSwitcherPanel();
+          updateRoleSwitcherAvatar({ telegram_id: userId, name: RoleSwitcher.users.find((user)=> user?.telegram_id === userId)?.name });
           setToast("Аватар обновлён");
         }catch(e2){
           console.warn(e2);
