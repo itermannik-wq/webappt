@@ -925,7 +925,7 @@ def avatar_url(filename: Optional[str]) -> Optional[str]:
 # ---------------------------
 
 ALLOWLIST_CACHE: Dict[int, Dict[str, Any]] = {}
-ALLOWLIST_MTIME: Optional[float] = None
+ALLOWLIST_MTIME_NS: Optional[int] = None
 
 
 def load_allowlist() -> Dict[int, Dict[str, Any]]:
@@ -993,17 +993,17 @@ def sync_allowlist_to_db(allow: Dict[int, Dict[str, Any]]) -> None:
     else:
         db_exec("UPDATE users SET active=0;")
 def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
-    global ALLOWLIST_CACHE, ALLOWLIST_MTIME
+    global ALLOWLIST_CACHE, ALLOWLIST_MTIME_NS
     path = CFG.USERS_JSON_PATH
     try:
-        mtime = os.path.getmtime(path)
+        mtime_ns = os.stat(path).st_mtime_ns
     except FileNotFoundError:
-        mtime = None
-    if mtime != ALLOWLIST_MTIME:
+        mtime_ns = None
+    if mtime_ns != ALLOWLIST_MTIME_NS:
         allow = load_allowlist()
         sync_allowlist_to_db(allow)
         ALLOWLIST_CACHE = allow
-        ALLOWLIST_MTIME = mtime
+        ALLOWLIST_MTIME_NS = mtime_ns
         return ALLOWLIST_CACHE
     return ALLOWLIST_CACHE
 
@@ -2889,12 +2889,12 @@ async def lifespan(app: FastAPI):
     allow = load_allowlist()
     sync_allowlist_to_db(allow)
     app.state.allowlist = allow
-    global ALLOWLIST_CACHE, ALLOWLIST_MTIME
+    global ALLOWLIST_CACHE, ALLOWLIST_MTIME_NS
     ALLOWLIST_CACHE = allow
     try:
-        ALLOWLIST_MTIME = os.path.getmtime(CFG.USERS_JSON_PATH)
+        ALLOWLIST_MTIME_NS = os.stat(CFG.USERS_JSON_PATH).st_mtime_ns
     except FileNotFoundError:
-        ALLOWLIST_MTIME = None
+        ALLOWLIST_MTIME_NS = None
 
     # init bot + dp
     global bot, dp
