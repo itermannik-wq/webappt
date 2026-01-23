@@ -88,7 +88,14 @@
       justify-content:space-between;
       gap: 10px;
       margin-bottom: 12px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+    }
+    .topbarRole{
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex: 0 0 auto;
     }
     .monthClosedRow{
       display:flex;
@@ -152,6 +159,31 @@
       -webkit-tap-highlight-color: transparent;
     }
     .btnIcon:active{ transform: scale(.98); }
+    .pullRefresh{
+      position: fixed;
+      top: calc(var(--safe-top) + 6px);
+      left: 50%;
+      transform: translate(-50%, -42px);
+      opacity: 0;
+      pointer-events: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      box-shadow: var(--shadow);
+      transition: opacity .12s ease, transform .12s ease;
+      z-index: 40;
+    }
+    .pullRefresh.show{
+      opacity: 1;
+    }
+    .pullRefresh.loading .icon{
+      animation: spin 800ms linear infinite;
+    }
 
     .section{
       margin-top: 14px;
@@ -2044,7 +2076,7 @@
       .ring{ width: 90px; height: 90px; }
       .ringInner{ width: 70px; height: 70px; }
       .topbar{ align-items: flex-start; }
-      .topbarActions{ width: 100%; justify-content: space-between; }
+      .topbarRole{ width: 100%; justify-content: flex-end; }
     }
   </style>
 </head>
@@ -2058,6 +2090,9 @@
   </div>
 
   <div class="app">
+    <div id="pullRefresh" class="pullRefresh" aria-hidden="true">
+      <span id="pullRefreshIcon" class="icon">refresh</span>
+    </div>
     <div class="topbar">
       <div class="monthTitle">
         <button id="monthBtn" class="pill" type="button" aria-label="Выбор месяца">
@@ -2070,6 +2105,7 @@
         <button id="refreshBtn" class="btnIcon" type="button" aria-label="Обновить">
           <span class="icon">refresh</span>
         </button>
+      <div class="topbarRole">
         <div id="roleSwitcher" class="roleSwitcher hidden">
           <button id="roleSwitcherBtn" class="roleSwitcherBtn" type="button" aria-expanded="false">
             <span id="roleSwitcherAvatar" class="roleSwitcherBtnAvatar" aria-hidden="true"></span>
@@ -7558,12 +7594,6 @@
       });
 
       // topbar
-      $("#refreshBtn").addEventListener("click", async ()=>{
-        try{
-          await refreshAll();
-          setToast("Обновлено");
-        }catch(e){ alert(String(e.message||e)); }
-      });
       $("#monthBtn")?.addEventListener("click", ()=>{
         openMonthModal();
       });
@@ -7609,6 +7639,8 @@
           setRoleSwitcherOpen(false);
         }
       });
+
+      setupPullToRefresh();
 
       // month modal
       $("#closeMonthModal").addEventListener("click", closeMonthModal);
@@ -8011,6 +8043,102 @@
       $("#backupRestoreCancelBtn").addEventListener("click", closeBackupRestoreModal);
       $("#backupRestoreConfirmBtn").addEventListener("click", confirmBackupRestore);
     }
+
+    function setupPullToRefresh(){
+      const indicator = $("#pullRefresh");
+      const icon = $("#pullRefreshIcon");
+      if (!indicator || !icon) return;
+      let startY = null;
+      let pulling = false;
+      let isRefreshing = false;
+      let lastOffset = 0;
+      const threshold = 70;
+      const maxOffset = 110;
+
+      function setIndicator(offset){
+        lastOffset = offset;
+        indicator.classList.toggle("show", offset > 6 || isRefreshing);
+        const translate = -42 + Math.min(offset, maxOffset);
+        indicator.style.transform = `translate(-50%, ${translate}px)`;
+        indicator.style.opacity = Math.min(1, offset / 40);
+        if (!isRefreshing){
+          const rotate = Math.min(180, offset * 2);
+          icon.style.transform = `rotate(${rotate}deg)`;
+        }
+      }
+
+      function resetIndicator(){
+        indicator.classList.remove("show", "loading");
+        indicator.style.transform = "translate(-50%, -42px)";
+        indicator.style.opacity = "0";
+        icon.style.transform = "";
+      }
+
+      function onStart(clientY){
+        if (window.scrollY > 0 || isRefreshing) return;
+        startY = clientY;
+        pulling = true;
+      }
+
+      function onMove(clientY, event){
+        if (!pulling || startY === null) return;
+        const delta = clientY - startY;
+        if (delta <= 0) return;
+        if (event?.cancelable) event.preventDefault();
+        const offset = Math.min(delta, maxOffset);
+        setIndicator(offset);
+      }
+
+      async function onEnd(){
+        if (!pulling) return;
+        pulling = false;
+        startY = null;
+        if (lastOffset >= threshold && !isRefreshing){
+          isRefreshing = true;
+          indicator.classList.add("loading", "show");
+          indicator.style.opacity = "1";
+          indicator.style.transform = "translate(-50%, 6px)";
+          try{
+            await refreshAll();
+            setToast("Обновлено");
+          }catch(e){
+            alert(String(e.message || e));
+          }finally{
+            isRefreshing = false;
+            resetIndicator();
+            lastOffset = 0;
+          }
+          return;
+        }
+        resetIndicator();
+        lastOffset = 0;
+      }
+
+      document.addEventListener("touchstart", (event)=>{
+        onStart(event.touches?.[0]?.clientY);
+      }, { passive: true });
+
+      document.addEventListener("touchmove", (event)=>{
+        onMove(event.touches?.[0]?.clientY, event);
+      }, { passive: false });
+
+      document.addEventListener("touchend", onEnd);
+      document.addEventListener("touchcancel", onEnd);
+
+      document.addEventListener("pointerdown", (event)=>{
+        if (event.pointerType !== "mouse") return;
+        onStart(event.clientY);
+      });
+
+      document.addEventListener("pointermove", (event)=>{
+        if (event.pointerType !== "mouse") return;
+        onMove(event.clientY, event);
+      });
+
+      document.addEventListener("pointerup", onEnd);
+      document.addEventListener("pointercancel", onEnd);
+    }
+
 
     /**********************
      * Boot
