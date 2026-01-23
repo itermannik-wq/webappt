@@ -7485,6 +7485,14 @@
           setToast("Обновлено");
         }catch(e){ alert(String(e.message||e)); }
       });
+      $("#monthBtn")?.addEventListener("click", ()=>{
+        openMonthModal();
+      });
+      $("#roleSwitcherBtn")?.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        if (State.sessionRole !== "admin") return;
+        setRoleSwitcherOpen(!RoleSwitcher.open);
+      });
       $("#roleAvatarInput")?.addEventListener("change", async (e)=>{
         const input = e.currentTarget;
         const file = input?.files?.[0];
