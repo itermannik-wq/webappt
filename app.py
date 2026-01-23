@@ -1,3 +1,4 @@
+
 # app.py
 # FastAPI API + планировщик отчётов + aiogram bot (единое приложение)
 # По ТЗ: SQLite, allowlist (users.json), роли, Telegram WebApp auth (initData), расчёты как Excel.
@@ -2921,6 +2922,12 @@ def webapp():
         return JSONResponse({"detail": "webapp.html not found"}, status_code=404)
     return FileResponse(path, media_type="text/html")
 
+@APP.get("/users.json")
+def users_json():
+    path = CFG.USERS_JSON_PATH
+    if not os.path.exists(path):
+        return JSONResponse({"detail": "users.json not found"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
 
 # ---------------------------
 # Auth
