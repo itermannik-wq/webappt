@@ -88,7 +88,7 @@
       justify-content:space-between;
       gap: 10px;
       margin-bottom: 12px;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
     }
     .topbarRole{
       display: flex;
@@ -947,6 +947,7 @@
       flex: 0 0 auto;
       flex-wrap: wrap;
       justify-content: flex-end;
+      margin-left: auto;
     }
     #expWarn{
       white-space: normal;
@@ -2070,13 +2071,20 @@
     }
 
     /* Small screens */
+    @media (max-width: 540px){
+      .app{ max-width: 100%; }
+      .topbar{ justify-content: flex-start; }
+      .monthTitle{ flex: 1 1 100%; }
+      .topbarActions{ width: 100%; justify-content: flex-start; margin-left: 0; }
+      .topbarRole{ width: auto; justify-content: flex-start; }
+    }
     @media (max-width: 360px){
       .grid2{ grid-template-columns: 1fr; }
       .chartWrap{ height: 190px; }
       .ring{ width: 90px; height: 90px; }
       .ringInner{ width: 70px; height: 70px; }
       .topbar{ align-items: flex-start; }
-      .topbarRole{ width: 100%; justify-content: flex-end; }
+      .topbarRole{ width: auto; justify-content: flex-start; }
     }
   </style>
 </head>
