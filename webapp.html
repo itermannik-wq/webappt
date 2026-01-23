@@ -693,6 +693,104 @@
       color: var(--muted);
       white-space: nowrap;
     }
+    .roleSwitcher{
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .roleSwitcherBtn{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--stroke);
+      background: var(--card2);
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: transform .18s ease, background .18s ease, box-shadow .18s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .roleSwitcherBtn .icon{
+      font-size: 18px;
+      color: var(--muted2);
+      transition: transform .25s ease;
+    }
+    .roleSwitcher.open .roleSwitcherBtn{
+      background: rgba(16,185,129,.12);
+      border-color: rgba(16,185,129,.28);
+      box-shadow: 0 10px 20px rgba(16,185,129,.15);
+      transform: translateY(-1px);
+    }
+    .roleSwitcher.open .roleSwitcherBtn .icon{
+      transform: rotate(180deg);
+      color: rgba(16,185,129,.9);
+    }
+    .roleSwitcherPanel{
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      min-width: 220px;
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(-8px) scale(.98);
+      pointer-events: none;
+      overflow: hidden;
+      border-radius: 16px;
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      box-shadow: var(--shadow);
+      transition: max-height .26s ease, opacity .2s ease, transform .2s ease;
+      z-index: 20;
+    }
+    .roleSwitcher.open .roleSwitcherPanel{
+      max-height: 320px;
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    .roleSwitcherList{
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px;
+    }
+    .roleSwitcherItem{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      transition: background .2s ease, border-color .2s ease, transform .2s ease;
+    }
+    .roleSwitcherItem:hover{
+      background: rgba(16,185,129,.10);
+      border-color: rgba(16,185,129,.22);
+      transform: translateX(2px);
+    }
+    .roleSwitcherItem.active{
+      background: rgba(16,185,129,.16);
+      border-color: rgba(16,185,129,.35);
+    }
+    .roleSwitcherName{
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .roleSwitcherMeta{
+      font-size: 11px;
+      color: var(--muted2);
+    }
+    .roleSwitcherEmpty{
+      padding: 12px 14px;
+      font-size: 12px;
+      color: var(--muted2);
+    }
     #expWarn{
       white-space: normal;
       max-width: 100%;
@@ -1332,6 +1430,25 @@
     @keyframes screenIn{
       to { opacity: 1; transform: translateX(0); }
     }
+    .app.user-switching{
+      animation: userSwitchFade .48s ease;
+      will-change: transform, opacity;
+    }
+    @keyframes userSwitchFade{
+      0%{ opacity: .2; transform: translateY(10px) scale(.99); }
+      45%{ opacity: .12; transform: translateY(-6px) scale(.985); }
+      100%{ opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce){
+      .app.user-switching{
+        animation: none;
+      }
+      .roleSwitcherBtn,
+      .roleSwitcherPanel,
+      .roleSwitcherItem{
+        transition: none;
+      }
+    }
 
     /* Forms */
     .form{
@@ -1826,6 +1943,13 @@
         <button id="refreshBtn" class="btnIcon" type="button" aria-label="Обновить">
           <span class="icon">refresh</span>
         </button>
+        <div id="roleSwitcher" class="roleSwitcher hidden">
+          <button id="roleSwitcherBtn" class="roleSwitcherBtn" type="button" aria-expanded="false">
+            <span id="roleSwitcherLabel">роль: —</span>
+            <span class="icon">expand_more</span>
+          </button>
+          <div id="roleSwitcherPanel" class="roleSwitcherPanel" role="listbox"></div>
+        </div>
         <span id="roleBadge" class="badge">роль: —</span>
       </div>
     </div>
@@ -3203,6 +3327,8 @@
       month: null,
       monthId: null,
       role: "viewer",
+      sessionRole: "viewer",
+      activeUser: null,
 
       summary: null,
       services: [],
@@ -3252,6 +3378,12 @@
       backupBusy: false,
       settingsPage: null,
       settingsScroll: { menu: 0, page: 0 },
+    };
+
+    const RoleSwitcher = {
+      users: [],
+      open: false,
+      activeUserId: null,
     };
 
     /**********************
@@ -4576,6 +4708,124 @@
       $("#addSundayBtn").style.opacity = canEdit ? "1" : ".55";
     }
 
+    function getRoleLabel(role){
+      const labels = {
+        admin: "Администратор",
+        accountant: "Бухгалтер",
+        viewer: "Наблюдатель",
+      };
+      return labels[role] || role || "viewer";
+    }
+
+    function setRoleDisplay(user){
+      const roleName = getRoleLabel(State.role);
+      const displayName = (user?.name || "").trim();
+      const label = `роль: ${displayName || roleName}`;
+      const badge = $("#roleBadge");
+      if (badge) badge.textContent = label;
+      const switcherLabel = $("#roleSwitcherLabel");
+      if (switcherLabel) switcherLabel.textContent = label;
+    }
+
+    function updateRoleSwitcherVisibility(){
+      const isAdminSession = State.sessionRole === "admin";
+      $("#roleSwitcher")?.classList.toggle("hidden", !isAdminSession);
+      $("#roleBadge")?.classList.toggle("hidden", isAdminSession);
+    }
+
+    function setRoleSwitcherOpen(isOpen){
+      RoleSwitcher.open = isOpen;
+      const wrap = $("#roleSwitcher");
+      if (!wrap) return;
+      wrap.classList.toggle("open", isOpen);
+      $("#roleSwitcherBtn")?.setAttribute("aria-expanded", String(isOpen));
+    }
+
+    function renderRoleSwitcherPanel(){
+      const panel = $("#roleSwitcherPanel");
+      if (!panel) return;
+      panel.innerHTML = "";
+      if (!RoleSwitcher.users.length){
+        panel.innerHTML = `<div class="roleSwitcherEmpty">Пользователи не найдены.</div>`;
+        return;
+      }
+      const list = document.createElement("div");
+      list.className = "roleSwitcherList";
+      RoleSwitcher.users.forEach((user, idx)=>{
+        const btn = document.createElement("button");
+        const userId = user?.telegram_id;
+        const role = user?.role || "viewer";
+        const name = (user?.name || "").trim() || `Пользователь ${userId || "—"}`;
+        btn.type = "button";
+        btn.className = "roleSwitcherItem" + (userId === RoleSwitcher.activeUserId ? " active" : "");
+        btn.dataset.userId = String(userId || "");
+        btn.style.transitionDelay = `${idx * 30}ms`;
+        btn.innerHTML = `
+          <div>
+            <div class="roleSwitcherName">${escapeHtml(name)}</div>
+            <div class="roleSwitcherMeta">${escapeHtml(getRoleLabel(role))}</div>
+          </div>
+          <span class="icon">${userId === RoleSwitcher.activeUserId ? "done" : "person"}</span>
+        `;
+        btn.addEventListener("click", ()=>{
+          switchActiveUser(user);
+        });
+        list.appendChild(btn);
+      });
+      panel.appendChild(list);
+    }
+
+    async function loadRoleSwitcherUsers(){
+      if (State.sessionRole !== "admin") return;
+      try{
+        const res = await fetch("users.json", { cache: "no-store" });
+        if (!res.ok) throw new Error("users.json not found");
+        const data = await res.json();
+        RoleSwitcher.users = Array.isArray(data) ? data.filter((user)=> user && user.active !== false) : [];
+      }catch(e){
+        RoleSwitcher.users = [];
+      }
+      if (!RoleSwitcher.activeUserId && State.activeUser?.telegram_id){
+        RoleSwitcher.activeUserId = State.activeUser.telegram_id;
+      }
+      renderRoleSwitcherPanel();
+    }
+
+    function triggerUserSwitchAnimation(){
+      const app = $(".app");
+      if (!app) return;
+      app.classList.remove("user-switching");
+      void app.offsetWidth;
+      app.classList.add("user-switching");
+      clearTimeout(window.__userSwitchT);
+      window.__userSwitchT = setTimeout(()=> app.classList.remove("user-switching"), 520);
+    }
+
+    function ensureScreenAccessAfterRoleSwitch(){
+      if (State.role === "viewer" && $("#screenAdd")?.classList.contains("active")){
+        switchScreen("dashboard");
+        setToast("Нет доступа");
+      }
+    }
+
+    function switchActiveUser(user){
+      if (!user) return;
+      const nextId = user?.telegram_id;
+      if (RoleSwitcher.activeUserId === nextId){
+        setRoleSwitcherOpen(false);
+        return;
+      }
+      RoleSwitcher.activeUserId = nextId;
+      State.activeUser = user;
+      State.role = user?.role || "viewer";
+      setRoleDisplay(user);
+      renderRoleSwitcherPanel();
+      applyRoleUI();
+      ensureScreenAccessAfterRoleSwitch();
+      triggerUserSwitchAnimation();
+      setRoleSwitcherOpen(false);
+    }
+
     function applyRoleUI(){
       const canEdit = (State.role === "admin" || State.role === "accountant");
       const isViewer = State.role === "viewer";
@@ -4593,6 +4843,7 @@
       }
       updateAttachmentControls();
       renderDraftsCard();
+      updateRoleSwitcherVisibility();
     }
 
     function updateAttachmentControls(){
@@ -7055,6 +7306,20 @@
         }catch(e){ alert(String(e.message||e)); }
       });
       $("#monthBtn").addEventListener("click", openMonthModal);
+      $("#roleSwitcherBtn")?.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        setRoleSwitcherOpen(!RoleSwitcher.open);
+      });
+      $("#roleSwitcherPanel")?.addEventListener("click", (e)=>{
+        e.stopPropagation();
+      });
+      document.addEventListener("click", (e)=>{
+        const wrap = $("#roleSwitcher");
+        if (!wrap || !RoleSwitcher.open) return;
+        if (!wrap.contains(e.target)){
+          setRoleSwitcherOpen(false);
+        }
+      });
 
       // month modal
       $("#closeMonthModal").addEventListener("click", closeMonthModal);
@@ -7500,9 +7765,12 @@
       }
 
       State.role = API.user?.role || "viewer";
-      const displayName = (API.user?.name || "").trim();
-      $("#roleBadge").textContent = `роль: ${displayName || State.role}`;
+      State.sessionRole = API.user?.role || "viewer";
+      State.activeUser = API.user || null;
+      RoleSwitcher.activeUserId = API.user?.telegram_id || null;
+      setRoleDisplay(API.user);
       applyRoleUI();
+      await loadRoleSwitcherUsers();
 
       const themePromise = loadThemeSetting().catch(()=> applyTheme("auto"));
       await loadMonthsForYear(State.year);
