@@ -793,6 +793,9 @@
       position: absolute;
       top: calc(100% + 8px);
       right: 0;
+      left: auto;
+      width: min(92vw, 360px);
+      max-width: 92vw;
       min-width: 220px;
       max-height: 0;
       opacity: 0;
@@ -808,7 +811,7 @@
       z-index: 20;
     }
     .roleSwitcher.open .roleSwitcherPanel{
-      max-height: min(360px, calc(100vh - var(--safe-top) - var(--safe-bot) - 140px));
+      max-height: min(360px, calc(100vh - var(--safe-top) - var(--safe-bot) - 120px));
       opacity: 1;
       transform: translateY(0) scale(1);
       pointer-events: auto;
@@ -948,6 +951,9 @@
       flex: 0 0 auto;
       flex-wrap: wrap;
       justify-content: flex-end;
+      margin-left: auto;
+    }
+    .topbarRole{
       margin-left: auto;
     }
     #expWarn{
@@ -1714,7 +1720,7 @@
       transform: translateY(6px) scale(.98);
     }
     .dropdown.open .dropdownPanel{
-      max-height: 260px;
+      max-height: min(320px, calc(100vh - var(--safe-top) - var(--safe-bot) - 160px));
       opacity: 1;
       transform: translateY(0) scale(1);
       pointer-events: auto;
@@ -2076,8 +2082,8 @@
       .app{ max-width: 100%; }
       .topbar{ justify-content: flex-start; }
       .monthTitle{ flex: 1 1 100%; }
-      .topbarActions{ width: 100%; justify-content: flex-start; margin-left: 0; }
-      .topbarRole{ width: auto; justify-content: flex-start; }
+      .topbarActions{ width: 100%; justify-content: space-between; margin-left: 0; }
+      .topbarRole{ width: auto; justify-content: flex-end; }
     }
     @media (max-width: 360px){
       .grid2{ grid-template-columns: 1fr; }
@@ -2085,7 +2091,7 @@
       .ring{ width: 90px; height: 90px; }
       .ringInner{ width: 70px; height: 70px; }
       .topbar{ align-items: flex-start; }
-      .topbarRole{ width: auto; justify-content: flex-start; }
+      .topbarRole{ width: auto; justify-content: flex-end; }
     }
   </style>
 </head>
@@ -4936,7 +4942,17 @@
 
     function getUserAvatarUrl(userId){
       if (!userId) return null;
-      return RoleAvatars.byId.get(String(userId)) || null;
+      const url = RoleAvatars.byId.get(String(userId)) || null;
+      return resolveAvatarUrl(url);
+    }
+
+    function resolveAvatarUrl(url){
+      if (!url) return null;
+      const normalized = url.startsWith("http") ? url : `${API.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+      if (!API.token) return normalized;
+      if (normalized.includes("token=")) return normalized;
+      const separator = normalized.includes("?") ? "&" : "?";
+      return `${normalized}${separator}token=${encodeURIComponent(API.token)}`;
     }
 
     function setUserAvatarUrl(userId, url){

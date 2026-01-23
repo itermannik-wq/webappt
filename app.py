@@ -3049,6 +3049,7 @@ def me(u: sqlite3.Row = Depends(get_current_user)):
 
 @APP.get("/api/users")
 def list_users(u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer"))):
+    refresh_allowlist_if_needed()
     rows = db_fetchall(
         """
         SELECT telegram_id, name, role, avatar_filename, active
