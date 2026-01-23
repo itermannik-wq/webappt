@@ -960,6 +960,7 @@ def load_allowlist() -> Dict[int, Dict[str, Any]]:
 
 def sync_allowlist_to_db(allow: Dict[int, Dict[str, Any]]) -> None:
     now = iso_now(CFG.tzinfo())
+    allowed_ids = set(allow.keys())
     for tid, u in allow.items():
         existing = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (tid,))
         if not existing:
@@ -979,6 +980,18 @@ def sync_allowlist_to_db(allow: Dict[int, Dict[str, Any]]) -> None:
                 (u.get("name"), u.get("role", existing["role"]), 1 if u.get("active", True) else 0, tid),
             )
 
+    if allowed_ids:
+        placeholders = ",".join("?" for _ in allowed_ids)
+        db_exec(
+            f"""
+            UPDATE users
+            SET active=0
+            WHERE telegram_id NOT IN ({placeholders});
+            """,
+            tuple(allowed_ids),
+        )
+    else:
+        db_exec("UPDATE users SET active=0;")
 def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
     global ALLOWLIST_CACHE, ALLOWLIST_MTIME
     path = CFG.USERS_JSON_PATH

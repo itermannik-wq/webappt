@@ -799,6 +799,7 @@
       transform: translateY(-8px) scale(.98);
       pointer-events: none;
       overflow: hidden;
+      overflow-y: auto;
       border-radius: 16px;
       background: var(--card);
       border: 1px solid var(--stroke);
@@ -807,7 +808,7 @@
       z-index: 20;
     }
     .roleSwitcher.open .roleSwitcherPanel{
-      max-height: 320px;
+      max-height: min(360px, calc(100vh - var(--safe-top) - var(--safe-bot) - 140px));
       opacity: 1;
       transform: translateY(0) scale(1);
       pointer-events: auto;
