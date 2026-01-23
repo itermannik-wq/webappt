@@ -1,4 +1,3 @@
-
 # app.py
 # FastAPI API + планировщик отчётов + aiogram bot (единое приложение)
 # По ТЗ: SQLite, allowlist (users.json), роли, Telegram WebApp auth (initData), расчёты как Excel.
@@ -2070,7 +2069,6 @@ async def send_report_to_recipients(
                 await bot_send_or_http_error(chat_id, text, safe_markup)
                 log_message_delivery(kind, chat_id, "success", None)
             else:
-                await bot_send_safe(chat_id, text, safe_markup)
                 ok, err = await bot_send_safe(chat_id, text, safe_markup)
                 if ok:
                     log_message_delivery(kind, chat_id, "success", None)
@@ -2086,21 +2084,40 @@ async def send_report_to_recipients(
 @router.message(Command("start"))
 async def on_start(m: Message):
     tid = m.from_user.id if m.from_user else 0
-    if not tid or not is_allowed_telegram_user(tid):
-        await m.answer(
+    if not tid:
+        return
+    if not is_allowed_telegram_user(tid):
+        await bot_send_safe(
+            tid,
             "Доступ запрещён. Ваш Telegram ID не в allowlist.\n"
             f"Ваш Telegram ID: {tid}\n"
-            "Добавьте его в users.json и повторите /start."
+            "Добавьте его в users.json и повторите /start.",
         )
         return
     if tid:
         register_bot_subscriber(tid)
 
     role = get_user_role_from_db(tid)
-    await m.answer(
-        "Меню бухгалтерии:",
-        reply_markup=main_menu_kb(role),
-    )
+    await bot_send_safe(tid, "Меню бухгалтерии:", reply_markup=main_menu_kb(role))
+
+
+def acquire_polling_lock(path: str) -> bool:
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as lock_file:
+        lock_file.write(str(os.getpid()))
+    return True
+
+
+def release_polling_lock(path: Optional[str]) -> None:
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return
 
 
 @router.message(F.text)
@@ -2866,15 +2883,29 @@ async def lifespan(app: FastAPI):
     reschedule_jobs()
 
     # start polling as background task
-    polling_task = asyncio.create_task(dp.start_polling(bot))  # type: ignore[arg-type]
+    token_hash = hashlib.sha256(CFG.BOT_TOKEN.encode("utf-8")).hexdigest()[:8]
+    polling_lock_path = os.path.join(
+        tempfile.gettempdir(),
+        f"telegram_bot_polling_{token_hash}.lock",
+    )
+    polling_task = None
+    if acquire_polling_lock(polling_lock_path):
+        polling_task = asyncio.create_task(dp.start_polling(bot))  # type: ignore[arg-type]
+    else:
+        print(
+            "Polling is already running in another process. "
+            "Skip starting getUpdates to avoid TelegramConflictError."
+        )
 
     try:
         yield
     finally:
         try:
-            polling_task.cancel()
+            if polling_task:
+                polling_task.cancel()
         except Exception:
             pass
+        release_polling_lock(polling_lock_path)
         try:
             await bot.session.close()  # type: ignore[union-attr]
         except Exception:
