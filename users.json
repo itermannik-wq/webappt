@@ -1,5 +1,5 @@
 [
   { "telegram_id": 1677321068, "name": "Никита", "role": "admin", "active": true },
-  { "telegram_id": 4484852128, "name": "Мария", "role": "accountant", "active": true },
+  { "telegram_id": 1212121212, "name": "Мария", "role": "accountant", "active": true },
   { "telegram_id": 448485212, "name": "Пастор", "role": "viewer", "active": true }
 ]

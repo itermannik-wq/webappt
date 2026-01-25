@@ -72,7 +72,6 @@ load_dotenv(BASE_DIR / ".env")
 ATTACHMENTS_DIR = BASE_DIR / "uploads" / "receipts"
 UPLOADS_DIR = BASE_DIR / "uploads"
 BACKUPS_DIR = BASE_DIR / "backups"
-AVATARS_DIR = UPLOADS_DIR / "avatars"
 ALLOWED_ATTACHMENT_MIME_TYPES = {
     "image/jpeg",
     "image/png",
@@ -81,12 +80,6 @@ ALLOWED_ATTACHMENT_MIME_TYPES = {
 }
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 MAX_ATTACHMENTS_PER_EXPENSE = 10
-ALLOWED_AVATAR_MIME_TYPES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-}
-MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 # ---------------------------
 # Config
@@ -192,8 +185,6 @@ def init_db() -> None:
         );
         """
     )
-    if not table_has_column("users", "avatar_filename"):
-        db_exec("ALTER TABLE users ADD COLUMN avatar_filename TEXT;")
     # months
     db_exec(
         """
@@ -214,7 +205,6 @@ def init_db() -> None:
         );
         """
     )
-    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
     # services
     db_exec(
         """
@@ -911,21 +901,12 @@ def attachment_extension(orig_filename: str, mime: str) -> str:
     }.get(mime, "")
 
 
-def avatar_extension(mime: str) -> str:
-    return ALLOWED_AVATAR_MIME_TYPES.get(mime, "")
-
-
-def avatar_url(filename: Optional[str]) -> Optional[str]:
-    if not filename:
-        return None
-    return f"/api/avatars/{urllib.parse.quote(filename)}"
-
 # ---------------------------
 # Allowlist (users.json) + sync to DB
 # ---------------------------
 
 ALLOWLIST_CACHE: Dict[int, Dict[str, Any]] = {}
-ALLOWLIST_MTIME_NS: Optional[int] = None
+ALLOWLIST_MTIME: Optional[float] = None
 
 
 def load_allowlist() -> Dict[int, Dict[str, Any]]:
@@ -960,7 +941,6 @@ def load_allowlist() -> Dict[int, Dict[str, Any]]:
 
 def sync_allowlist_to_db(allow: Dict[int, Dict[str, Any]]) -> None:
     now = iso_now(CFG.tzinfo())
-    allowed_ids = set(allow.keys())
     for tid, u in allow.items():
         existing = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (tid,))
         if not existing:
@@ -980,30 +960,18 @@ def sync_allowlist_to_db(allow: Dict[int, Dict[str, Any]]) -> None:
                 (u.get("name"), u.get("role", existing["role"]), 1 if u.get("active", True) else 0, tid),
             )
 
-    if allowed_ids:
-        placeholders = ",".join("?" for _ in allowed_ids)
-        db_exec(
-            f"""
-            UPDATE users
-            SET active=0
-            WHERE telegram_id NOT IN ({placeholders});
-            """,
-            tuple(allowed_ids),
-        )
-    else:
-        db_exec("UPDATE users SET active=0;")
 def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
-    global ALLOWLIST_CACHE, ALLOWLIST_MTIME_NS
+    global ALLOWLIST_CACHE, ALLOWLIST_MTIME
     path = CFG.USERS_JSON_PATH
     try:
-        mtime_ns = os.stat(path).st_mtime_ns
+        mtime = os.path.getmtime(path)
     except FileNotFoundError:
-        mtime_ns = None
-    if mtime_ns != ALLOWLIST_MTIME_NS:
+        mtime = None
+    if mtime != ALLOWLIST_MTIME:
         allow = load_allowlist()
         sync_allowlist_to_db(allow)
         ALLOWLIST_CACHE = allow
-        ALLOWLIST_MTIME_NS = mtime_ns
+        ALLOWLIST_MTIME = mtime
         return ALLOWLIST_CACHE
     return ALLOWLIST_CACHE
 
@@ -2101,6 +2069,7 @@ async def send_report_to_recipients(
                 await bot_send_or_http_error(chat_id, text, safe_markup)
                 log_message_delivery(kind, chat_id, "success", None)
             else:
+                await bot_send_safe(chat_id, text, safe_markup)
                 ok, err = await bot_send_safe(chat_id, text, safe_markup)
                 if ok:
                     log_message_delivery(kind, chat_id, "success", None)
@@ -2116,40 +2085,21 @@ async def send_report_to_recipients(
 @router.message(Command("start"))
 async def on_start(m: Message):
     tid = m.from_user.id if m.from_user else 0
-    if not tid:
-        return
-    if not is_allowed_telegram_user(tid):
-        await bot_send_safe(
-            tid,
+    if not tid or not is_allowed_telegram_user(tid):
+        await m.answer(
             "Доступ запрещён. Ваш Telegram ID не в allowlist.\n"
             f"Ваш Telegram ID: {tid}\n"
-            "Добавьте его в users.json и повторите /start.",
+            "Добавьте его в users.json и повторите /start."
         )
         return
     if tid:
         register_bot_subscriber(tid)
 
     role = get_user_role_from_db(tid)
-    await bot_send_safe(tid, "Меню бухгалтерии:", reply_markup=main_menu_kb(role))
-
-
-def acquire_polling_lock(path: str) -> bool:
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        return False
-    with os.fdopen(fd, "w") as lock_file:
-        lock_file.write(str(os.getpid()))
-    return True
-
-
-def release_polling_lock(path: Optional[str]) -> None:
-    if not path:
-        return
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        return
+    await m.answer(
+        "Меню бухгалтерии:",
+        reply_markup=main_menu_kb(role),
+    )
 
 
 @router.message(F.text)
@@ -2889,12 +2839,12 @@ async def lifespan(app: FastAPI):
     allow = load_allowlist()
     sync_allowlist_to_db(allow)
     app.state.allowlist = allow
-    global ALLOWLIST_CACHE, ALLOWLIST_MTIME_NS
+    global ALLOWLIST_CACHE, ALLOWLIST_MTIME
     ALLOWLIST_CACHE = allow
     try:
-        ALLOWLIST_MTIME_NS = os.stat(CFG.USERS_JSON_PATH).st_mtime_ns
+        ALLOWLIST_MTIME = os.path.getmtime(CFG.USERS_JSON_PATH)
     except FileNotFoundError:
-        ALLOWLIST_MTIME_NS = None
+        ALLOWLIST_MTIME = None
 
     # init bot + dp
     global bot, dp
@@ -2915,29 +2865,15 @@ async def lifespan(app: FastAPI):
     reschedule_jobs()
 
     # start polling as background task
-    token_hash = hashlib.sha256(CFG.BOT_TOKEN.encode("utf-8")).hexdigest()[:8]
-    polling_lock_path = os.path.join(
-        tempfile.gettempdir(),
-        f"telegram_bot_polling_{token_hash}.lock",
-    )
-    polling_task = None
-    if acquire_polling_lock(polling_lock_path):
-        polling_task = asyncio.create_task(dp.start_polling(bot))  # type: ignore[arg-type]
-    else:
-        print(
-            "Polling is already running in another process. "
-            "Skip starting getUpdates to avoid TelegramConflictError."
-        )
+    polling_task = asyncio.create_task(dp.start_polling(bot))  # type: ignore[arg-type]
 
     try:
         yield
     finally:
         try:
-            if polling_task:
-                polling_task.cancel()
+            polling_task.cancel()
         except Exception:
             pass
-        release_polling_lock(polling_lock_path)
         try:
             await bot.session.close()  # type: ignore[union-attr]
         except Exception:
@@ -2985,12 +2921,6 @@ def webapp():
         return JSONResponse({"detail": "webapp.html not found"}, status_code=404)
     return FileResponse(path, media_type="text/html")
 
-@APP.get("/users.json")
-def users_json():
-    path = CFG.USERS_JSON_PATH
-    if not os.path.exists(path):
-        return JSONResponse({"detail": "users.json not found"}, status_code=404)
-    return FileResponse(path, media_type="application/json")
 
 # ---------------------------
 # Auth
@@ -3025,127 +2955,12 @@ def auth_telegram(body: AuthTelegramIn, request: Request):
         },
         CFG.SESSION_SECRET,
     )
-    return {
-        "token": token,
-        "user": {
-            "telegram_id": telegram_id,
-            "name": u["name"],
-            "role": u["role"],
-            "avatar_url": avatar_url(u["avatar_filename"]),
-        },
-    }
+    return {"token": token, "user": {"telegram_id": telegram_id, "name": u["name"], "role": u["role"]}}
 
 
 @APP.get("/api/me")
 def me(u: sqlite3.Row = Depends(get_current_user)):
-    return {
-        "id": u["id"],
-        "telegram_id": u["telegram_id"],
-        "name": u["name"],
-        "role": u["role"],
-        "avatar_url": avatar_url(u["avatar_filename"]),
-    }
-
-
-@APP.get("/api/users")
-def list_users(u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer"))):
-    refresh_allowlist_if_needed()
-    rows = db_fetchall(
-        """
-        SELECT telegram_id, name, role, avatar_filename, active
-        FROM users
-        WHERE active=1
-        ORDER BY name COLLATE NOCASE ASC, telegram_id ASC;
-        """
-    )
-    items = [
-        {
-            "telegram_id": int(r["telegram_id"]),
-            "name": r["name"],
-            "role": r["role"],
-            "avatar_url": avatar_url(r["avatar_filename"]),
-        }
-        for r in rows
-    ]
-    return {"items": items}
-
-
-@APP.get("/api/avatars/{filename}")
-def get_avatar_file(
-        filename: str,
-        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
-):
-    if "/" in filename or "\\" in filename or ".." in Path(filename).parts:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    path = AVATARS_DIR / filename
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Avatar not found")
-    ext = path.suffix.lower()
-    media_type = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".webp": "image/webp",
-    }.get(ext, "application/octet-stream")
-    return FileResponse(path, media_type=media_type)
-
-
-@APP.post("/api/users/{telegram_id}/avatar")
-def upload_avatar(
-        telegram_id: int,
-        file: UploadFile = File(...),
-        u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
-):
-    if int(u["telegram_id"]) != telegram_id and str(u["role"]) != "admin":
-        raise HTTPException(status_code=403, detail="Insufficient role")
-
-    target = db_fetchone("SELECT id, avatar_filename FROM users WHERE telegram_id=?;", (telegram_id,))
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    content_type = (file.content_type or "").lower()
-    if content_type not in ALLOWED_AVATAR_MIME_TYPES:
-        raise HTTPException(status_code=415, detail="Unsupported file type")
-
-    ext = avatar_extension(content_type)
-    stored_filename = f"avatar_{telegram_id}_{int(time.time())}_{secrets.token_hex(4)}{ext}"
-    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
-    target_path = AVATARS_DIR / stored_filename
-
-    size_bytes = 0
-    try:
-        with target_path.open("wb") as out:
-            while True:
-                chunk = file.file.read(1024 * 512)
-                if not chunk:
-                    break
-                size_bytes += len(chunk)
-                if size_bytes > MAX_AVATAR_BYTES:
-                    raise HTTPException(status_code=413, detail="File too large")
-                out.write(chunk)
-    except HTTPException:
-        if target_path.exists():
-            target_path.unlink()
-        raise
-    except Exception:
-        if target_path.exists():
-            target_path.unlink()
-        raise HTTPException(status_code=500, detail="Failed to store avatar")
-
-    old_filename = target["avatar_filename"]
-    if old_filename:
-        old_path = AVATARS_DIR / old_filename
-        if old_path.exists():
-            try:
-                old_path.unlink()
-            except Exception:
-                pass
-
-    db_exec(
-        "UPDATE users SET avatar_filename=? WHERE telegram_id=?;",
-        (stored_filename, telegram_id),
-    )
-    return {"avatar_url": avatar_url(stored_filename)}
+    return {"id": u["id"], "telegram_id": u["telegram_id"], "name": u["name"], "role": u["role"]}
 
 
 # ---------------------------

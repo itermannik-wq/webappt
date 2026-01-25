@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Dict, List
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, confloat, conint, constr
 
 app = FastAPI(title="Telegram WebApp Demo")
@@ -46,15 +46,6 @@ def webapp_page():
             return f.read()
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="webapp.html not found рядом с server.py")
-
-
-@app.get("/users.json")
-def users_json():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(base_dir, "users.json")
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="users.json not found рядом с server.py")
-    return FileResponse(path, media_type="application/json")
 
 
 @app.get("/api/entries", response_model=EntriesResponse)

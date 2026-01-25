@@ -88,14 +88,6 @@
       justify-content:space-between;
       gap: 10px;
       margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    .topbarRole{
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 10px;
-      flex: 0 0 auto;
     }
     .monthClosedRow{
       display:flex;
@@ -108,10 +100,6 @@
       align-items:center;
       gap: 10px;
       min-width: 0;
-      flex: 1 1 180px;
-    }
-    .monthTitle .pill{
-      max-width: 100%;
     }
     .monthTitle .title{
       font-size: 18px;
@@ -159,31 +147,6 @@
       -webkit-tap-highlight-color: transparent;
     }
     .btnIcon:active{ transform: scale(.98); }
-    .pullRefresh{
-      position: fixed;
-      top: calc(var(--safe-top) + 6px);
-      left: 50%;
-      transform: translate(-50%, -42px);
-      opacity: 0;
-      pointer-events: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: var(--card);
-      border: 1px solid var(--stroke);
-      box-shadow: var(--shadow);
-      transition: opacity .12s ease, transform .12s ease;
-      z-index: 40;
-    }
-    .pullRefresh.show{
-      opacity: 1;
-    }
-    .pullRefresh.loading .icon{
-      animation: spin 800ms linear infinite;
-    }
 
     .section{
       margin-top: 14px;
@@ -729,227 +692,6 @@
       font-size: 12px;
       color: var(--muted);
       white-space: nowrap;
-    }
-    .roleSwitcher{
-      position: relative;
-      display: inline-flex;
-      align-items: center;
-    }
-    .roleSwitcherBtn{
-      display:inline-flex;
-      align-items:center;
-      gap: 6px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--stroke);
-      background: var(--card2);
-      font-size: 12px;
-      color: var(--muted);
-      cursor: pointer;
-      transition: transform .18s ease, background .18s ease, box-shadow .18s ease;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .roleSwitcherBtnAvatar{
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,.08);
-      display: grid;
-      place-items: center;
-      overflow: hidden;
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text);
-      text-transform: uppercase;
-    }
-    .roleSwitcherBtnAvatar img{
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    .roleSwitcherBtnAvatarFallback{
-      width: 100%;
-      height: 100%;
-      display: grid;
-      place-items: center;
-    }
-    .roleSwitcherBtn .icon{
-      font-size: 18px;
-      color: var(--muted2);
-      transition: transform .25s ease;
-    }
-    .roleSwitcher.open .roleSwitcherBtn{
-      background: rgba(16,185,129,.12);
-      border-color: rgba(16,185,129,.28);
-      box-shadow: 0 10px 20px rgba(16,185,129,.15);
-      transform: translateY(-1px);
-    }
-    .roleSwitcher.open .roleSwitcherBtn .icon{
-      transform: rotate(180deg);
-      color: rgba(16,185,129,.9);
-    }
-    .roleSwitcherPanel{
-      position: absolute;
-      top: calc(100% + 8px);
-      right: 0;
-      left: auto;
-      width: min(92vw, 360px);
-      max-width: 92vw;
-      min-width: 220px;
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(-8px) scale(.98);
-      pointer-events: none;
-      overflow: hidden;
-      overflow-y: auto;
-      border-radius: 16px;
-      background: var(--card);
-      border: 1px solid var(--stroke);
-      box-shadow: var(--shadow);
-      transition: max-height .26s ease, opacity .2s ease, transform .2s ease;
-      z-index: 20;
-    }
-    .roleSwitcher.open .roleSwitcherPanel{
-      max-height: min(360px, calc(100vh - var(--safe-top) - var(--safe-bot) - 120px));
-      opacity: 1;
-      transform: translateY(0) scale(1);
-      pointer-events: auto;
-    }
-    .roleSwitcherHeader{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px 14px 8px;
-      border-bottom: 1px solid var(--stroke);
-    }
-    .roleSwitcherHeaderInfo{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 0;
-    }
-    .roleSwitcherAvatar{
-      width: 46px;
-      height: 46px;
-      border-radius: 50%;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,.08);
-      display: grid;
-      place-items: center;
-      overflow: hidden;
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text);
-      text-transform: uppercase;
-    }
-    .roleSwitcherAvatar img{
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    .roleSwitcherAvatarBtn{
-      border-radius: 12px;
-      padding: 6px 10px;
-      font-size: 12px;
-      border: 1px solid var(--stroke);
-      background: var(--card2);
-      color: var(--text);
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      transition: transform .18s ease, background .18s ease;
-    }
-    .roleSwitcherAvatarBtn:active{
-      transform: translateY(1px);
-    }
-    .roleSwitcherTitle{
-      font-size: 13px;
-      font-weight: 600;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .roleSwitcherSubtitle{
-      font-size: 11px;
-      color: var(--muted2);
-    }
-    .roleSwitcherList{
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      padding: 8px;
-    }
-    .roleSwitcherItem{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--text);
-      cursor: pointer;
-      transition: background .2s ease, border-color .2s ease, transform .2s ease;
-    }
-    .roleSwitcherItem:hover{
-      background: rgba(16,185,129,.10);
-      border-color: rgba(16,185,129,.22);
-      transform: translateX(2px);
-    }
-    .roleSwitcherItem.active{
-      background: rgba(16,185,129,.16);
-      border-color: rgba(16,185,129,.35);
-    }
-    .roleSwitcherItemMain{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 0;
-    }
-    .roleSwitcherItemAvatar{
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,.08);
-      display: grid;
-      place-items: center;
-      overflow: hidden;
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text);
-      text-transform: uppercase;
-    }
-    .roleSwitcherItemAvatar img{
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    .roleSwitcherName{
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .roleSwitcherMeta{
-      font-size: 11px;
-      color: var(--muted2);
-    }
-    .roleSwitcherEmpty{
-      padding: 12px 14px;
-      font-size: 12px;
-      color: var(--muted2);
-    }
-    .topbarActions{
-      flex: 0 0 auto;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      margin-left: auto;
-    }
-    .topbarRole{
-      margin-left: auto;
     }
     #expWarn{
       white-space: normal;
@@ -1590,25 +1332,6 @@
     @keyframes screenIn{
       to { opacity: 1; transform: translateX(0); }
     }
-    .app.user-switching{
-      animation: userSwitchFade .48s ease;
-      will-change: transform, opacity;
-    }
-    @keyframes userSwitchFade{
-      0%{ opacity: .2; transform: translateY(10px) scale(.99); }
-      45%{ opacity: .12; transform: translateY(-6px) scale(.985); }
-      100%{ opacity: 1; transform: translateY(0) scale(1); }
-    }
-    @media (prefers-reduced-motion: reduce){
-      .app.user-switching{
-        animation: none;
-      }
-      .roleSwitcherBtn,
-      .roleSwitcherPanel,
-      .roleSwitcherItem{
-        transition: none;
-      }
-    }
 
     /* Forms */
     .form{
@@ -1715,7 +1438,7 @@
       transform: translateY(6px) scale(.98);
     }
     .dropdown.open .dropdownPanel{
-      max-height: min(320px, calc(100vh - var(--safe-top) - var(--safe-bot) - 160px));
+      max-height: 260px;
       opacity: 1;
       transform: translateY(0) scale(1);
       pointer-events: auto;
@@ -2073,19 +1796,11 @@
     }
 
     /* Small screens */
-    @media (max-width: 540px){
-      .app{ max-width: 100%; }
-      .topbar{ justify-content: flex-start; }
-      .monthTitle{ flex: 1 1 100%; }
-      .topbarRole{ width: auto; justify-content: flex-end; }
-    }
     @media (max-width: 360px){
       .grid2{ grid-template-columns: 1fr; }
       .chartWrap{ height: 190px; }
       .ring{ width: 90px; height: 90px; }
       .ringInner{ width: 70px; height: 70px; }
-      .topbar{ align-items: flex-start; }
-      .topbarRole{ width: auto; justify-content: flex-end; }
     }
   </style>
 </head>
@@ -2099,9 +1814,6 @@
   </div>
 
   <div class="app">
-    <div id="pullRefresh" class="pullRefresh" aria-hidden="true">
-      <span id="pullRefreshIcon" class="icon">refresh</span>
-    </div>
     <div class="topbar">
       <div class="monthTitle">
         <button id="monthBtn" class="pill" type="button" aria-label="Выбор месяца">
@@ -2110,16 +1822,10 @@
           <span class="icon" style="font-size:20px;color:var(--muted)">expand_more</span>
         </button>
       </div>
-      <div class="topbarRole">
-        <div id="roleSwitcher" class="roleSwitcher hidden">
-          <button id="roleSwitcherBtn" class="roleSwitcherBtn" type="button" aria-expanded="false">
-            <span id="roleSwitcherAvatar" class="roleSwitcherBtnAvatar" aria-hidden="true"></span>
-            <span id="roleSwitcherLabel">роль: —</span>
-            <span class="icon">expand_more</span>
-          </button>
-          <div id="roleSwitcherPanel" class="roleSwitcherPanel" role="listbox"></div>
-          <input id="roleAvatarInput" type="file" class="hidden" accept="image/*" />
-        </div>
+      <div class="row" style="gap:10px;">
+        <button id="refreshBtn" class="btnIcon" type="button" aria-label="Обновить">
+          <span class="icon">refresh</span>
+        </button>
         <span id="roleBadge" class="badge">роль: —</span>
       </div>
     </div>
@@ -3222,9 +2928,6 @@
     </div>
   </div>
 
-  </div>
-
-
 
   <script>
     /**********************
@@ -3442,9 +3145,7 @@
         if (!API.token) return API.auth();
         // cheap /api/me check
         try{
-          const me = await API.get("/api/me");
-          API.user = { ...API.user, ...me };
-          localStorage.setItem("sessionUser", JSON.stringify(API.user));
+          await API.get("/api/me");
         }catch(e){
           return API.auth();
         }
@@ -3502,8 +3203,6 @@
       month: null,
       monthId: null,
       role: "viewer",
-      sessionRole: "viewer",
-      activeUser: null,
 
       summary: null,
       services: [],
@@ -3553,12 +3252,6 @@
       backupBusy: false,
       settingsPage: null,
       settingsScroll: { menu: 0, page: 0 },
-    };
-
-    const RoleSwitcher = {
-      users: [],
-      open: false,
-      activeUserId: null,
     };
 
     /**********************
@@ -4883,262 +4576,6 @@
       $("#addSundayBtn").style.opacity = canEdit ? "1" : ".55";
     }
 
-    function getRoleLabel(role){
-      const labels = {
-        admin: "Администратор",
-        accountant: "Бухгалтер",
-        viewer: "Наблюдатель",
-      };
-      return labels[role] || role || "viewer";
-    }
-
-    function setRoleDisplay(user){
-      const roleName = getRoleLabel(State.role);
-      const displayName = (user?.name || "").trim();
-      const label = `роль: ${displayName || roleName}`;
-      const badge = $("#roleBadge");
-      if (badge) badge.textContent = label;
-      const switcherLabel = $("#roleSwitcherLabel");
-      if (switcherLabel) switcherLabel.textContent = label;
-      updateRoleSwitcherAvatar(user);
-    }
-
-    function updateRoleSwitcherVisibility(){
-      const showSwitcher = true;
-      $("#roleSwitcher")?.classList.toggle("hidden", !showSwitcher);
-      $("#roleBadge")?.classList.toggle("hidden", showSwitcher);
-    }
-
-    function setRoleSwitcherOpen(isOpen){
-      RoleSwitcher.open = isOpen;
-      const wrap = $("#roleSwitcher");
-      if (!wrap) return;
-      wrap.classList.toggle("open", isOpen);
-      $("#roleSwitcherBtn")?.setAttribute("aria-expanded", String(isOpen));
-    }
-
-    const RoleAvatars = {
-      byId: new Map(),
-    };
-
-
-    function getUserInitials(name){
-      const parts = (name || "").trim().split(/\s+/).filter(Boolean);
-      if (!parts.length) return "—";
-      const first = parts[0][0] || "";
-      const second = parts.length > 1 ? parts[1][0] : "";
-      return (first + second).toUpperCase();
-    }
-
-    function getUserAvatarUrl(userId){
-      if (!userId) return null;
-      const url = RoleAvatars.byId.get(String(userId)) || null;
-      return resolveAvatarUrl(url);
-    }
-
-    function resolveAvatarUrl(url){
-      if (!url) return null;
-      const normalized = url.startsWith("http") ? url : `${API.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
-      if (!API.token) return normalized;
-      if (normalized.includes("token=")) return normalized;
-      const separator = normalized.includes("?") ? "&" : "?";
-      return `${normalized}${separator}token=${encodeURIComponent(API.token)}`;
-    }
-
-    function setUserAvatarUrl(userId, url){
-      if (!userId) return;
-      const key = String(userId);
-      if (url){
-        RoleAvatars.byId.set(key, url);
-      } else {
-        RoleAvatars.byId.delete(key);
-      }
-    }
-
-    function readFileAsDataUrl(file){
-      return new Promise((resolve, reject)=>{
-        const reader = new FileReader();
-        reader.onload = ()=> resolve(String(reader.result || ""));
-        reader.onerror = ()=> reject(new Error("read_error"));
-        reader.readAsDataURL(file);
-      });
-    }
-
-    async function uploadUserAvatar(userId, file){
-      const headers = {};
-      if (API.token) headers["Authorization"] = `Bearer ${API.token}`;
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch(`${API.baseUrl}/api/users/${encodeURIComponent(userId)}/avatar`, {
-        method: "POST",
-        headers,
-        body: form,
-      });
-      if (!res.ok){
-        const t = await res.text().catch(()=> "");
-        throw new Error(t || `Upload failed: ${res.status}`);
-      }
-      return res.json();
-    }
-
-
-    function buildAvatarMarkup(userId, name, fallbackClass){
-      const avatar = getUserAvatarUrl(userId);
-      if (avatar){
-        return `<img src="${escapeHtml(avatar)}" alt="Аватар ${escapeHtml(name)}" />`;
-      }
-      return `<span class="${fallbackClass}">${escapeHtml(getUserInitials(name))}</span>`;
-    }
-
-    function updateRoleSwitcherAvatar(user){
-      const avatarWrap = $("#roleSwitcherAvatar");
-      if (!avatarWrap) return;
-      const name = (user?.name || "").trim() || "Пользователь";
-      const userId = user?.telegram_id || RoleSwitcher.activeUserId;
-      avatarWrap.innerHTML = buildAvatarMarkup(userId, name, "roleSwitcherBtnAvatarFallback");
-    }
-
-    function renderRoleSwitcherPanel(){
-      const panel = $("#roleSwitcherPanel");
-      if (!panel) return;
-      panel.innerHTML = "";
-      if (!RoleSwitcher.users.length){
-        panel.innerHTML = `<div class="roleSwitcherEmpty">Пользователи не найдены.</div>`;
-        return;
-      }
-      const allowSwitch = State.sessionRole === "admin";
-      const activeUser = RoleSwitcher.users.find((user)=> user?.telegram_id === RoleSwitcher.activeUserId) || RoleSwitcher.users[0];
-      if (activeUser && !RoleSwitcher.activeUserId){
-        RoleSwitcher.activeUserId = activeUser.telegram_id;
-      }
-      if (activeUser){
-        const name = (activeUser?.name || "").trim() || "Пользователь";
-        const role = activeUser?.role || "viewer";
-        updateRoleSwitcherAvatar(activeUser);
-        const header = document.createElement("div");
-        header.className = "roleSwitcherHeader";
-        header.innerHTML = `
-          <div class="roleSwitcherHeaderInfo">
-            <div class="roleSwitcherAvatar">
-              ${buildAvatarMarkup(activeUser?.telegram_id, name, "roleSwitcherAvatarFallback")}
-            </div>
-            <div style="min-width:0;">
-              <div class="roleSwitcherTitle">${escapeHtml(name)}</div>
-              <div class="roleSwitcherSubtitle">${escapeHtml(getRoleLabel(role))}</div>
-            </div>
-          </div>
-          <button class="roleSwitcherAvatarBtn" type="button">
-            <span class="icon" style="font-size:16px;">photo_camera</span>
-            Добавить
-          </button>
-        `;
-        const btn = header.querySelector(".roleSwitcherAvatarBtn");
-        btn?.addEventListener("click", ()=>{
-          const input = $("#roleAvatarInput");
-          if (!input) return;
-          input.dataset.userId = String(activeUser?.telegram_id || "");
-          input.value = "";
-          input.click();
-        });
-        panel.appendChild(header);
-      }
-      const list = document.createElement("div");
-      list.className = "roleSwitcherList";
-      RoleSwitcher.users.forEach((user, idx)=>{
-        const btn = document.createElement("button");
-        const userId = user?.telegram_id;
-        const role = user?.role || "viewer";
-        const name = (user?.name || "").trim() || `Пользователь ${userId || "—"}`;
-        const isActive = userId === RoleSwitcher.activeUserId;
-        btn.type = "button";
-        btn.className = "roleSwitcherItem" + (isActive ? " active" : "") + (!allowSwitch && !isActive ? " disabled" : "");
-        btn.dataset.userId = String(userId || "");
-        btn.style.transitionDelay = `${idx * 30}ms`;
-        btn.innerHTML = `
-          <div class="roleSwitcherItemMain">
-            <div class="roleSwitcherItemAvatar">
-              ${buildAvatarMarkup(userId, name, "roleSwitcherItemAvatarFallback")}
-            </div>
-            <div>
-              <div class="roleSwitcherName">${escapeHtml(name)}</div>
-              <div class="roleSwitcherMeta">${escapeHtml(getRoleLabel(role))}</div>
-            </div>
-          </div>
-          <span class="icon">${isActive ? "done" : "person"}</span>
-        `;
-        if (allowSwitch){
-          btn.addEventListener("click", ()=>{
-            switchActiveUser(user);
-          });
-        }
-        list.appendChild(btn);
-      });
-      panel.appendChild(list);
-    }
-
-    async function loadRoleSwitcherUsers(){
-      try{
-        const data = await API.get("/api/users");
-        RoleSwitcher.users = Array.isArray(data.items) ? data.items : [];
-        RoleAvatars.byId = new Map();
-        RoleSwitcher.users.forEach((user)=>{
-          if (user?.telegram_id){
-            setUserAvatarUrl(user.telegram_id, user.avatar_url || null);
-          }
-        });
-      }catch(e){
-        RoleSwitcher.users = [];
-      }
-      if (!RoleSwitcher.activeUserId && State.activeUser?.telegram_id){
-        RoleSwitcher.activeUserId = State.activeUser.telegram_id;
-      }
-      const activeUser = RoleSwitcher.users.find((user)=> user?.telegram_id === RoleSwitcher.activeUserId);
-      if (activeUser){
-        State.activeUser = { ...State.activeUser, ...activeUser };
-        setRoleDisplay(State.activeUser);
-      }
-      renderRoleSwitcherPanel();
-    }
-
-    function triggerUserSwitchAnimation(){
-      const app = $(".app");
-      if (!app) return;
-      app.classList.remove("user-switching");
-      void app.offsetWidth;
-      app.classList.add("user-switching");
-      clearTimeout(window.__userSwitchT);
-      window.__userSwitchT = setTimeout(()=> app.classList.remove("user-switching"), 520);
-    }
-
-    function ensureScreenAccessAfterRoleSwitch(){
-      if (State.role === "viewer" && $("#screenAdd")?.classList.contains("active")){
-        switchScreen("dashboard");
-        setToast("Нет доступа");
-      }
-    }
-
-    function switchActiveUser(user){
-      if (!user) return;
-      const nextId = user?.telegram_id;
-      if (State.sessionRole !== "admin" && nextId !== State.activeUser?.telegram_id){
-        setToast("Нет доступа");
-        return;
-      }
-      if (RoleSwitcher.activeUserId === nextId){
-        setRoleSwitcherOpen(false);
-        return;
-      }
-      RoleSwitcher.activeUserId = nextId;
-      State.activeUser = user;
-      State.role = user?.role || "viewer";
-      setRoleDisplay(user);
-      renderRoleSwitcherPanel();
-      applyRoleUI();
-      ensureScreenAccessAfterRoleSwitch();
-      triggerUserSwitchAnimation();
-      setRoleSwitcherOpen(false);
-    }
-
     function applyRoleUI(){
       const canEdit = (State.role === "admin" || State.role === "accountant");
       const isViewer = State.role === "viewer";
@@ -5156,7 +4593,6 @@
       }
       updateAttachmentControls();
       renderDraftsCard();
-      updateRoleSwitcherVisibility();
     }
 
     function updateAttachmentControls(){
@@ -7612,53 +7048,13 @@
       });
 
       // topbar
-      $("#monthBtn")?.addEventListener("click", ()=>{
-        openMonthModal();
-      });
-      $("#roleSwitcherBtn")?.addEventListener("click", (e)=>{
-        e.stopPropagation();
-        setRoleSwitcherOpen(!RoleSwitcher.open);
-      });
-      $("#roleAvatarInput")?.addEventListener("change", async (e)=>{
-        const input = e.currentTarget;
-        const file = input?.files?.[0];
-        const userId = input?.dataset?.userId;
-        if (!file || !userId) return;
-        if (!file.type.startsWith("image/")){
-          setToast("Нужен файл изображения");
-          return;
-        }
-        if (file.size > 2 * 1024 * 1024){
-          setToast("Файл слишком большой");
-          return;
-        }
+      $("#refreshBtn").addEventListener("click", async ()=>{
         try{
-          const data = await uploadUserAvatar(userId, file);
-          setUserAvatarUrl(userId, data.avatar_url || null);
-          const updatedUser = RoleSwitcher.users.find((user)=> user?.telegram_id === Number(userId));
-          if (updatedUser){
-            updatedUser.avatar_url = data.avatar_url || null;
-            if (RoleSwitcher.activeUserId === updatedUser.telegram_id){
-              State.activeUser = { ...State.activeUser, ...updatedUser };
-            }
-          }
-          renderRoleSwitcherPanel();
-          updateRoleSwitcherAvatar({ telegram_id: userId, name: updatedUser?.name });
-          setToast("Аватар обновлён");
-        }catch(e2){
-          console.warn(e2);
-          setToast("Не удалось загрузить");
-        }
+          await refreshAll();
+          setToast("Обновлено");
+        }catch(e){ alert(String(e.message||e)); }
       });
-      document.addEventListener("click", (e)=>{
-        const wrap = $("#roleSwitcher");
-        if (!wrap || !RoleSwitcher.open) return;
-        if (!wrap.contains(e.target)){
-          setRoleSwitcherOpen(false);
-        }
-      });
-
-      setupPullToRefresh();
+      $("#monthBtn").addEventListener("click", openMonthModal);
 
       // month modal
       $("#closeMonthModal").addEventListener("click", closeMonthModal);
@@ -8062,102 +7458,6 @@
       $("#backupRestoreConfirmBtn").addEventListener("click", confirmBackupRestore);
     }
 
-    function setupPullToRefresh(){
-      const indicator = $("#pullRefresh");
-      const icon = $("#pullRefreshIcon");
-      if (!indicator || !icon) return;
-      let startY = null;
-      let pulling = false;
-      let isRefreshing = false;
-      let lastOffset = 0;
-      const threshold = 70;
-      const maxOffset = 110;
-
-      function setIndicator(offset){
-        lastOffset = offset;
-        indicator.classList.toggle("show", offset > 6 || isRefreshing);
-        const translate = -42 + Math.min(offset, maxOffset);
-        indicator.style.transform = `translate(-50%, ${translate}px)`;
-        indicator.style.opacity = Math.min(1, offset / 40);
-        if (!isRefreshing){
-          const rotate = Math.min(180, offset * 2);
-          icon.style.transform = `rotate(${rotate}deg)`;
-        }
-      }
-
-      function resetIndicator(){
-        indicator.classList.remove("show", "loading");
-        indicator.style.transform = "translate(-50%, -42px)";
-        indicator.style.opacity = "0";
-        icon.style.transform = "";
-      }
-
-      function onStart(clientY){
-        if (window.scrollY > 0 || isRefreshing) return;
-        startY = clientY;
-        pulling = true;
-      }
-
-      function onMove(clientY, event){
-        if (!pulling || startY === null) return;
-        const delta = clientY - startY;
-        if (delta <= 0) return;
-        if (event?.cancelable) event.preventDefault();
-        const offset = Math.min(delta, maxOffset);
-        setIndicator(offset);
-      }
-
-      async function onEnd(){
-        if (!pulling) return;
-        pulling = false;
-        startY = null;
-        if (lastOffset >= threshold && !isRefreshing){
-          isRefreshing = true;
-          indicator.classList.add("loading", "show");
-          indicator.style.opacity = "1";
-          indicator.style.transform = "translate(-50%, 6px)";
-          try{
-            await refreshAll();
-            setToast("Обновлено");
-          }catch(e){
-            alert(String(e.message || e));
-          }finally{
-            isRefreshing = false;
-            resetIndicator();
-            lastOffset = 0;
-          }
-          return;
-        }
-        resetIndicator();
-        lastOffset = 0;
-      }
-
-      document.addEventListener("touchstart", (event)=>{
-        onStart(event.touches?.[0]?.clientY);
-      }, { passive: true });
-
-      document.addEventListener("touchmove", (event)=>{
-        onMove(event.touches?.[0]?.clientY, event);
-      }, { passive: false });
-
-      document.addEventListener("touchend", onEnd);
-      document.addEventListener("touchcancel", onEnd);
-
-      document.addEventListener("pointerdown", (event)=>{
-        if (event.pointerType !== "mouse") return;
-        onStart(event.clientY);
-      });
-
-      document.addEventListener("pointermove", (event)=>{
-        if (event.pointerType !== "mouse") return;
-        onMove(event.clientY, event);
-      });
-
-      document.addEventListener("pointerup", onEnd);
-      document.addEventListener("pointercancel", onEnd);
-    }
-
-
     /**********************
      * Boot
      **********************/
@@ -8200,12 +7500,9 @@
       }
 
       State.role = API.user?.role || "viewer";
-      State.sessionRole = API.user?.role || "viewer";
-      State.activeUser = API.user || null;
-      RoleSwitcher.activeUserId = API.user?.telegram_id || null;
-      setRoleDisplay(API.user);
+      const displayName = (API.user?.name || "").trim();
+      $("#roleBadge").textContent = `роль: ${displayName || State.role}`;
       applyRoleUI();
-      await loadRoleSwitcherUsers();
 
       const themePromise = loadThemeSetting().catch(()=> applyTheme("auto"));
       await loadMonthsForYear(State.year);
