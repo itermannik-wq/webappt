@@ -80,6 +80,7 @@ ALLOWED_ATTACHMENT_MIME_TYPES = {
 }
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 MAX_ATTACHMENTS_PER_EXPENSE = 10
+ACCOUNTS = ("main", "praise", "alpha")
 
 # ---------------------------
 # Config
@@ -170,6 +171,19 @@ def table_has_column(table: str, col: str) -> bool:
     rows = db_fetchall(f"PRAGMA table_info({table});")
     return any(r["name"] == col for r in rows)
 
+def services_unique_has_account() -> bool:
+    if not db_fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='services';"):
+        return False
+    rows = db_fetchall("PRAGMA index_list(services);")
+    for r in rows:
+        if int(r["unique"] or 0) != 1:
+            continue
+        idx_name = r["name"]
+        cols = [c["name"] for c in db_fetchall(f"PRAGMA index_info({idx_name});")]
+        if cols == ["month_id", "service_date", "account", "income_type"]:
+            return True
+    return False
+
 
 def init_db() -> None:
     # users
@@ -220,9 +234,10 @@ def init_db() -> None:
             mnsps_status TEXT NOT NULL DEFAULT 'Не собрана',
             pvs_ratio REAL NOT NULL DEFAULT 0,
             income_type TEXT NOT NULL DEFAULT 'donation',
+            account TEXT NOT NULL DEFAULT 'main',
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(month_id, service_date),
+            updated_at TEXT NOT NULL,         
+            UNIQUE(month_id, service_date, account, income_type),
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
         );
         """
@@ -241,6 +256,7 @@ def init_db() -> None:
             total REAL NOT NULL DEFAULT 0,
             comment TEXT,
             is_system INTEGER NOT NULL DEFAULT 0,
+            account TEXT NOT NULL DEFAULT 'main',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
@@ -473,9 +489,56 @@ def init_db() -> None:
         db_exec("ALTER TABLE services ADD COLUMN income_type TEXT NOT NULL DEFAULT 'donation';")
     db_exec("UPDATE services SET income_type='donation' WHERE income_type IS NULL OR income_type='';")
 
-    if not table_has_column("services", "income_type"):
-        db_exec("ALTER TABLE services ADD COLUMN income_type TEXT NOT NULL DEFAULT 'donation';")
-    db_exec("UPDATE services SET income_type='donation' WHERE income_type IS NULL OR income_type='';")
+    if not table_has_column("services", "account") or not services_unique_has_account():
+        has_account = table_has_column("services", "account")
+        db_exec(
+            """
+            CREATE TABLE services_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                month_id INTEGER NOT NULL,
+                service_date TEXT NOT NULL,
+                idx INTEGER NOT NULL,
+                cashless REAL NOT NULL DEFAULT 0,
+                cash REAL NOT NULL DEFAULT 0,
+                total REAL NOT NULL DEFAULT 0,
+                weekly_min_needed REAL NOT NULL DEFAULT 0,
+                mnsps_status TEXT NOT NULL DEFAULT 'Не собрана',
+                pvs_ratio REAL NOT NULL DEFAULT 0,
+                income_type TEXT NOT NULL DEFAULT 'donation',
+                account TEXT NOT NULL DEFAULT 'main',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(month_id, service_date, account, income_type),
+                FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+            );
+            """
+        )
+        account_expr = "COALESCE(account, 'main')" if has_account else "'main'"
+        db_exec(
+            f"""
+            INSERT INTO services_new (
+                id, month_id, service_date, idx, cashless, cash, total,
+                weekly_min_needed, mnsps_status, pvs_ratio, income_type, account,
+                created_at, updated_at
+            )
+            SELECT
+                id, month_id, service_date, idx, cashless, cash, total,
+                weekly_min_needed, mnsps_status, pvs_ratio,
+                COALESCE(income_type, 'donation'),
+                {account_expr},
+                created_at, updated_at
+            FROM services;
+            """
+        )
+        db_exec("DROP TABLE services;")
+        db_exec("ALTER TABLE services_new RENAME TO services;")
+    if table_has_column("services", "account"):
+        db_exec("UPDATE services SET account='main' WHERE account IS NULL OR account='';")
+
+    if not table_has_column("expenses", "account"):
+        db_exec("ALTER TABLE expenses ADD COLUMN account TEXT NOT NULL DEFAULT 'main';")
+    if table_has_column("expenses", "account"):
+        db_exec("UPDATE expenses SET account='main' WHERE account IS NULL OR account='';")
 
     if not table_has_column("months", "closed_at"):
         db_exec("ALTER TABLE months ADD COLUMN closed_at TEXT NULL;")
@@ -498,6 +561,14 @@ def iso_date(d: dt.date) -> str:
 
 def parse_iso_date(s: str) -> dt.date:
     return dt.date.fromisoformat(s)
+
+def normalize_account(value: Optional[str]) -> str:
+    s = str(value or "").strip().lower()
+    if not s:
+        return "main"
+    if s not in ACCOUNTS:
+        raise HTTPException(status_code=400, detail="Invalid account")
+    return s
 
 
 def normalize_alias(alias: str) -> str:
@@ -711,7 +782,7 @@ def get_budget_fact(month_id: int, category_name: str, include_system: bool) -> 
         """
         SELECT COALESCE(SUM(total), 0) AS s
         FROM expenses
-        WHERE month_id=? AND category=? AND (?=1 OR is_system=0);
+        WHERE month_id=? AND category=? AND account='main' AND (?=1 OR is_system=0);
         """,
         (month_id, category_name, 1 if include_system else 0),
     )
@@ -833,6 +904,7 @@ def normalize_expense_draft_payload(raw: Dict[str, Any], tz: ZoneInfo) -> Dict[s
     if tags is not None and not isinstance(tags, list):
         tags = [str(tags)]
     tags = normalize_tag_list(tags)
+    account = normalize_account(raw.get("account"))
 
     payload = {
         "expense_date": expense_date,
@@ -841,6 +913,7 @@ def normalize_expense_draft_payload(raw: Dict[str, Any], tz: ZoneInfo) -> Dict[s
         "qty": qty,
         "unit_amount": unit_amount,
         "comment": comment,
+        "account": account,
     }
     if tags:
         payload["tags"] = tags
@@ -1200,7 +1273,12 @@ def recalc_services_for_month(month_id: int) -> None:
         cash = float(s["cash"] or 0.0)
         total = round(cashless + cash, 2)
         income_type = str(s["income_type"] or "donation")
-        if income_type == "donation":
+        account = str(s["account"] or "main")
+        if account != "main":
+            status = "Доп. счет"
+            pvs = 0.0
+            weekly_min_for_row = 0.0
+        elif income_type == "donation":
             status = "Собрана" if (weekly_min and total > weekly_min) else "Не собрана"
             pvs = (total / weekly_min) if weekly_min else 0.0
             weekly_min_for_row = weekly_min
@@ -1219,13 +1297,22 @@ def recalc_services_for_month(month_id: int) -> None:
 
     # Update idx sequentially by date
     services2 = db_fetchall(
-        "SELECT id FROM services WHERE month_id=? AND income_type='donation' ORDER BY service_date ASC;",
+        """
+        SELECT id FROM services
+        WHERE month_id=? AND account='main' AND income_type='donation'
+        ORDER BY service_date ASC;
+        """,
         (month_id,),
     )
     for i, row in enumerate(services2, start=1):
         db_exec("UPDATE services SET idx=? WHERE id=?;", (i, row["id"]))
     db_exec(
-        "UPDATE services SET idx=0 WHERE month_id=? AND (income_type!='donation' OR income_type IS NULL);",
+        """
+        UPDATE services
+        SET idx=0
+        WHERE month_id=?
+          AND (account!='main' OR income_type!='donation' OR income_type IS NULL);
+        """,
         (month_id,),
     )
 
@@ -1274,7 +1361,7 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
         db_exec(
             """
             UPDATE expenses
-            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, updated_at=?
+            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, account='main', updated_at=?
             WHERE id=?;
             """,
             (iso_date(tithe_date), category, tithe_amount, tithe_amount, now, existing["id"]),
@@ -1286,8 +1373,8 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
             """
             INSERT INTO expenses (
                 month_id, expense_date, category, title, qty, unit_amount, total, comment,
-                is_system, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 1, ?, ?, NULL, 1, ?, ?);
+                is_system, account, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 1, ?, ?, NULL, 1, 'main', ?, ?);
             """,
             (month_id, iso_date(tithe_date), category, "10% Объединение", tithe_amount, tithe_amount, now, now),
         )
@@ -1303,8 +1390,18 @@ def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str,
     if ensure_tithe:
         ensure_tithe_expense(month_id, user_id=None)
 
-    income_sum = float(db_fetchone("SELECT COALESCE(SUM(total),0) AS s FROM services WHERE month_id=?;", (month_id,))["s"])
-    expenses_sum = float(db_fetchone("SELECT COALESCE(SUM(total),0) AS s FROM expenses WHERE month_id=?;", (month_id,))["s"])
+    income_sum = float(
+        db_fetchone(
+            "SELECT COALESCE(SUM(total),0) AS s FROM services WHERE month_id=? AND account='main';",
+            (month_id,),
+        )["s"]
+    )
+    expenses_sum = float(
+        db_fetchone(
+            "SELECT COALESCE(SUM(total),0) AS s FROM expenses WHERE month_id=? AND account='main';",
+            (month_id,),
+        )["s"]
+    )
 
     month_balance = round(income_sum - expenses_sum, 2)
     start_balance = float(m["start_balance"] or 0.0)
@@ -1329,7 +1426,12 @@ def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str,
     prev = db_fetchone("SELECT id FROM months WHERE year=? AND month=?;", (prev_y, prev_m))
     psdpm = None
     if prev:
-        prev_income = float(db_fetchone("SELECT COALESCE(SUM(total),0) AS s FROM services WHERE month_id=?;", (prev["id"],))["s"])
+        prev_income = float(
+            db_fetchone(
+                "SELECT COALESCE(SUM(total),0) AS s FROM services WHERE month_id=? AND account='main';",
+                (prev["id"],),
+            )["s"]
+        )
         if prev_income > 0:
             psdpm = (income_sum - prev_income) / prev_income
         else:
@@ -1340,7 +1442,10 @@ def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str,
         """
         SELECT AVG(total) AS a
         FROM services
-        WHERE month_id=? AND total>0 AND (income_type='donation' OR income_type IS NULL);
+        WHERE month_id=?
+          AND account='main'
+          AND total>0
+          AND (income_type='donation' OR income_type IS NULL);
         """,
         (month_id,),
     )
@@ -1370,6 +1475,23 @@ def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str,
                     "name": row["name"],
                 }
 
+    subaccounts: Dict[str, Dict[str, float]] = {}
+    for account in ("praise", "alpha"):
+        income = float(
+            db_fetchone(
+                "SELECT COALESCE(SUM(total),0) AS s FROM services WHERE account=?;",
+                (account,),
+            )["s"]
+        )
+        expenses = float(
+            db_fetchone(
+                "SELECT COALESCE(SUM(total),0) AS s FROM expenses WHERE account=?;",
+                (account,),
+            )["s"]
+        )
+        subaccounts[account] = {"balance": round(income - expenses, 2)}
+
+
 
     return {
         "month": {
@@ -1396,6 +1518,7 @@ def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str,
 
         "psdpm": psdpm,  # float or None
         "avg_sunday": round(avg_sunday, 2),
+        "subaccounts": subaccounts,
     }
 
 
@@ -1591,13 +1714,21 @@ def previous_period(period_type: str, year: int, month: Optional[int], quarter: 
 def compute_period_totals(start: dt.date, end: dt.date) -> Dict[str, float]:
     income = float(
         db_fetchone(
-            "SELECT COALESCE(SUM(total),0) AS s FROM services WHERE service_date BETWEEN ? AND ?;",
+            """
+            SELECT COALESCE(SUM(total),0) AS s
+            FROM services
+            WHERE service_date BETWEEN ? AND ? AND account='main';
+            """,
             (iso_date(start), iso_date(end)),
         )["s"]
     )
     expenses = float(
         db_fetchone(
-            "SELECT COALESCE(SUM(total),0) AS s FROM expenses WHERE expense_date BETWEEN ? AND ?;",
+            """
+            SELECT COALESCE(SUM(total),0) AS s
+            FROM expenses
+            WHERE expense_date BETWEEN ? AND ? AND account='main';
+            """,
             (iso_date(start), iso_date(end)),
         )["s"]
     )
@@ -1647,7 +1778,7 @@ def compute_period_analytics(
             """
             SELECT category, COALESCE(SUM(total),0) AS s
             FROM expenses
-            WHERE expense_date BETWEEN ? AND ?
+            WHERE expense_date BETWEEN ? AND ? AND account='main'
             GROUP BY category
             ORDER BY s DESC, category ASC
             LIMIT ?;
@@ -1829,6 +1960,7 @@ class ServiceIn(BaseModel):
     cashless: float = 0.0
     cash: float = 0.0
     income_type: str = "donation"
+    account: str = "main"
 
 
 class ExpenseIn(BaseModel):
@@ -1839,6 +1971,7 @@ class ExpenseIn(BaseModel):
     unit_amount: float = 0.0
     comment: Optional[str] = None
     tags: Optional[List[str]] = None
+    account: str = "main"
 
 class MonthBudgetIn(BaseModel):
     category_id: int
@@ -2305,7 +2438,13 @@ async def on_confirm(cq: CallbackQuery):
         m = get_or_create_month(s_date.year, s_date.month)
         month_id = int(m["id"])
 
-        before = db_fetchone("SELECT * FROM services WHERE month_id=? AND service_date=?;", (month_id, pending["service_date"]))
+        before = db_fetchone(
+            """
+            SELECT * FROM services
+            WHERE month_id=? AND service_date=? AND account='main' AND income_type='donation';
+            """,
+            (month_id, pending["service_date"]),
+        )
         cashless = float(pending["cashless"])
         cash = float(pending["cash"])
         total = round(cashless + cash, 2)
@@ -2315,7 +2454,7 @@ async def on_confirm(cq: CallbackQuery):
             db_exec(
                 """
                 UPDATE services
-                SET cashless=?, cash=?, total=?, updated_at=?
+                SET cashless=?, cash=?, total=?, account='main', updated_at=?
                 WHERE id=?;
                 """,
                 (cashless, cash, total, now, before["id"]),
@@ -2327,9 +2466,9 @@ async def on_confirm(cq: CallbackQuery):
                 """
                 INSERT INTO services (
                     month_id, service_date, idx, cashless, cash, total,
-                    weekly_min_needed, mnsps_status, pvs_ratio,
+                    weekly_min_needed, mnsps_status, pvs_ratio, account, income_type,
                     created_at, updated_at
-                ) VALUES (?, ?, 1, ?, ?, ?, 0, 'Не собрана', 0, ?, ?);
+                ) VALUES (?, ?, 1, ?, ?, ?, 0, 'Не собрана', 0, 'main', 'donation', ?, ?);
                 """,
                 (month_id, pending["service_date"], cashless, cash, total, now, now),
             )
@@ -2355,8 +2494,8 @@ async def on_confirm(cq: CallbackQuery):
             """
             INSERT INTO expenses (
                 month_id, expense_date, category, title, qty, unit_amount, total, comment,
-                is_system, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?);
+                is_system, account, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'main', ?, ?);
             """,
             (
                 month_id,
@@ -2469,7 +2608,7 @@ def build_month_expenses_report_text(today: dt.date) -> Tuple[str, InlineKeyboar
         """
         SELECT category, SUM(total) AS s
         FROM expenses
-        WHERE month_id=?
+        WHERE month_id=? AND account='main'
         GROUP BY category
         ORDER BY s DESC
         LIMIT 3;
@@ -2482,7 +2621,7 @@ def build_month_expenses_report_text(today: dt.date) -> Tuple[str, InlineKeyboar
         """
         SELECT expense_date, title, category, total
         FROM expenses
-        WHERE month_id=?
+        WHERE month_id=? AND account='main'
         ORDER BY expense_date DESC, id DESC
         LIMIT 5;
         """,
@@ -3247,8 +3386,6 @@ def create_service(
     tz = CFG.tzinfo()
     now = iso_now(tz)
 
-    service_date = body.service_date.isoformat()
-    before = db_fetchone("SELECT * FROM services WHERE month_id=? AND service_date=?;", (month_id, service_date))
 
     cashless = float(body.cashless)
     cash = float(body.cash)
@@ -3256,21 +3393,24 @@ def create_service(
     income_type = (body.income_type or "donation").strip().lower()
     if income_type not in ("donation", "other"):
         raise HTTPException(status_code=400, detail="Invalid income_type")
-
-    if before and str(before["income_type"] or "donation") != income_type:
-        raise HTTPException(
-            status_code=409,
-            detail="Service already exists for this date with another income type",
-        )
+    service_date = body.service_date.isoformat()
+    account = normalize_account(body.account)
+    before = db_fetchone(
+        """
+        SELECT * FROM services
+        WHERE month_id=? AND service_date=? AND account=? AND income_type=?;
+        """,
+        (month_id, service_date, account, income_type),
+    )
 
     if before:
         db_exec(
             """
             UPDATE services
-            SET cashless=?, cash=?, total=?, income_type=?, updated_at=?
+            SET cashless=?, cash=?, total=?, income_type=?, account=?, updated_at=?
             WHERE id=?;
             """,
-            (cashless, cash, total, income_type, now, before["id"]),
+            (cashless, cash, total, income_type, account, now, before["id"]),
         )
         after = db_fetchone("SELECT * FROM services WHERE id=?;", (before["id"],))
         log_audit(int(u["id"]), "UPDATE", "service", int(before["id"]), dict(before), dict(after) if after else None)
@@ -3282,11 +3422,11 @@ def create_service(
         """
         INSERT INTO services (
             month_id, service_date, idx, cashless, cash, total,
-            weekly_min_needed, mnsps_status, pvs_ratio, income_type,
+            weekly_min_needed, mnsps_status, pvs_ratio, income_type, account,
             created_at, updated_at
         ) VALUES (?, ?, 0, ?, ?, ?, 0, 'Не собрана', 0, ?, ?, ?);
         """,
-        (month_id, service_date, cashless, cash, total, income_type, now, now),
+        (month_id, service_date, cashless, cash, total, income_type, account, now, now),
     )
     after = db_fetchone("SELECT * FROM services WHERE id=?;", (new_id,))
     log_audit(int(u["id"]), "CREATE", "service", int(new_id), None, dict(after) if after else None)
@@ -3317,20 +3457,24 @@ def update_service(
     if income_type not in ("donation", "other"):
         raise HTTPException(status_code=400, detail="Invalid income_type")
     new_date = body.service_date.isoformat()
+    account = normalize_account(body.account)
     existing = db_fetchone(
-        "SELECT id FROM services WHERE month_id=? AND service_date=?;",
-        (int(before["month_id"]), new_date),
+        """
+        SELECT id FROM services
+        WHERE month_id=? AND service_date=? AND account=? AND income_type=?;
+        """,
+        (int(before["month_id"]), new_date, account, income_type),
     )
     if existing and int(existing["id"]) != int(service_id):
-        raise HTTPException(status_code=409, detail="Service date already exists")
+        raise HTTPException(status_code=409, detail="Service already exists for this account and date")
 
     db_exec(
         """
         UPDATE services
-        SET service_date=?, cashless=?, cash=?, total=?, income_type=?, updated_at=?
+        SET service_date=?, cashless=?, cash=?, total=?, income_type=?, account=?, updated_at=?
         WHERE id=?;
         """,
-        (new_date, cashless, cash, total, income_type, now, service_id),
+        (new_date, cashless, cash, total, income_type, account, now, service_id),
     )
     after = db_fetchone("SELECT * FROM services WHERE id=?;", (service_id,))
     log_audit(int(u["id"]), "UPDATE", "service", service_id, dict(before), dict(after) if after else None)
@@ -3722,14 +3866,15 @@ def create_expense(
     tz = CFG.tzinfo()
     now = iso_now(tz)
 
+    account = normalize_account(body.account)
     category = resolve_category(body.category, str(u["role"]), int(u["id"]))
     total = round(float(body.qty) * float(body.unit_amount), 2)
     new_id = db_exec_returning_id(
         """
         INSERT INTO expenses (
             month_id, expense_date, category, title, qty, unit_amount, total, comment,
-            is_system, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?);
+            is_system, account, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?);
         """,
         (
             month_id,
@@ -3740,6 +3885,7 @@ def create_expense(
             float(body.unit_amount),
             total,
             body.comment,
+            account,
             now,
             now,
         ),
@@ -3754,9 +3900,10 @@ def create_expense(
     # ensure tithe exists (depends on income; no harm to upsert)
     ensure_tithe_expense(month_id, user_id=int(u["id"]))
     warnings: List[Dict[str, Any]] = []
-    budget_warning = get_budget_warning_for_category(month_id, category)
-    if budget_warning:
-        warnings.append(budget_warning)
+    if account == "main":
+        budget_warning = get_budget_warning_for_category(month_id, category)
+        if budget_warning:
+            warnings.append(budget_warning)
     return {"id": new_id, "warnings": warnings}
 
 
@@ -3777,6 +3924,7 @@ def update_expense(
     tz = CFG.tzinfo()
     now = iso_now(tz)
 
+    account = normalize_account(body.account)
     category = resolve_category(body.category, str(u["role"]), int(u["id"]))
     total = round(float(body.qty) * float(body.unit_amount), 2)
     before_payload = dict(before)
@@ -3785,7 +3933,7 @@ def update_expense(
     db_exec(
         """
         UPDATE expenses
-        SET expense_date=?, category=?, title=?, qty=?, unit_amount=?, total=?, comment=?, updated_at=?
+        SET expense_date=?, category=?, title=?, qty=?, unit_amount=?, total=?, comment=?, account=?, updated_at=?
         WHERE id=?;
         """,
         (
@@ -3796,6 +3944,7 @@ def update_expense(
             float(body.unit_amount),
             total,
             body.comment,
+            account,
             now,
             expense_id,
         ),
@@ -3949,13 +4098,14 @@ def submit_draft(
     payload = normalize_expense_draft_payload(json.loads(draft["payload_json"]), tz)
     payload["category"] = resolve_category(payload.get("category"), str(u["role"]), int(u["id"]))
     total = round(float(payload["qty"]) * float(payload["unit_amount"]), 2)
+    account = normalize_account(payload.get("account"))
 
     new_id = db_exec_returning_id(
         """
         INSERT INTO expenses (
             month_id, expense_date, category, title, qty, unit_amount, total, comment,
-            is_system, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?);
+            is_system, account, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?);
         """,
         (
             month_id,
@@ -3966,6 +4116,7 @@ def submit_draft(
             float(payload["unit_amount"]),
             total,
             payload.get("comment"),
+            account,
             now,
             now,
         ),
@@ -4521,20 +4672,33 @@ def export_csv(
     w.writerow(["MONTH", int(m["year"]), int(m["month"])])
     w.writerow([])
     w.writerow(["SERVICES"])
-    w.writerow(["date", "idx", "cashless", "cash", "total", "weekly_min_needed", "mnsps_status", "pvs_ratio", "income_type"])
+    w.writerow(
+        [
+            "date",
+            "idx",
+            "cashless",
+            "cash",
+            "total",
+            "weekly_min_needed",
+            "mnsps_status",
+            "pvs_ratio",
+            "income_type",
+            "account",
+        ]
+    )
     for s in services:
         w.writerow([
             s["service_date"], s["idx"], s["cashless"], s["cash"], s["total"],
-            s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"], s["income_type"]
+            s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"], s["income_type"], s["account"]
         ])
 
     w.writerow([])
     w.writerow(["EXPENSES"])
-    w.writerow(["date", "category", "title", "qty", "unit_amount", "total", "comment", "is_system"])
+    w.writerow(["date", "category", "title", "qty", "unit_amount", "total", "comment", "is_system", "account"])
     for e in expenses:
         w.writerow([
             e["expense_date"], e["category"], e["title"], e["qty"], e["unit_amount"],
-            e["total"], e["comment"], e["is_system"]
+            e["total"], e["comment"], e["is_system"], e["account"]
         ])
 
     data = buf.getvalue().encode("utf-8-sig")
@@ -4570,21 +4734,42 @@ def export_excel(
         ws.append([])
 
         ws.append(["SERVICES"])
-        ws.append(["date", "idx", "cashless", "cash", "total", "weekly_min_needed", "mnsps_status", "pvs_ratio", "income_type"])
+        ws.append(
+            [
+                "date",
+                "idx",
+                "cashless",
+                "cash",
+                "total",
+                "weekly_min_needed",
+                "mnsps_status",
+                "pvs_ratio",
+                "income_type",
+                "account",
+            ]
+        )
         services = db_fetchall("SELECT * FROM services WHERE month_id=? ORDER BY service_date ASC;", (month_id,))
         for s in services:
             ws.append([
                 s["service_date"], s["idx"], s["cashless"], s["cash"], s["total"],
-                s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"], s["income_type"]
+                s["weekly_min_needed"], s["mnsps_status"], s["pvs_ratio"], s["income_type"], s["account"]
             ])
 
         ws.append([])
         ws.append(["EXPENSES"])
-        ws.append(["date", "category", "title", "qty", "unit_amount", "total", "comment", "is_system"])
+        ws.append(["date", "category", "title", "qty", "unit_amount", "total", "comment", "is_system", "account"])
         expenses = db_fetchall("SELECT * FROM expenses WHERE month_id=? ORDER BY expense_date ASC, id ASC;", (month_id,))
         for e in expenses:
             ws.append([
-                e["expense_date"], e["category"], e["title"], e["qty"], e["unit_amount"], e["total"], e["comment"], e["is_system"]
+                e["expense_date"],
+                e["category"],
+                e["title"],
+                e["qty"],
+                e["unit_amount"],
+                e["total"],
+                e["comment"],
+                e["is_system"],
+                e["account"],
             ])
 
         # simple width
