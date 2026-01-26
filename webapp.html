@@ -6876,7 +6876,9 @@
       CashflowState.currentId = r.id;
       const refused = parts.filter((p)=> p.state === "REFUSED_NEEDS_RETRY");
       const canResend = refused.length > 0 && State.role === "admin";
-      const canAdminSign = r.status === "PENDING_ADMIN" && State.role === "admin";
+      const adminPart = parts.find((p)=> p.is_admin);
+      const adminNeedsSign = adminPart && adminPart.state === "PENDING";
+      const canAdminSign = State.role === "admin" && adminNeedsSign && r.status !== "FINAL" && r.status !== "CANCELLED";
       const canCancel = State.role === "admin" && r.status !== "FINAL" && r.status !== "CANCELLED";
 
       detail.classList.remove("hidden");
