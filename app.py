@@ -3166,9 +3166,37 @@ APP.add_middleware(
     allow_headers=["*"],
 )
 
-from cashflow_routes import router as cashflow_router
+from cashflow_routes import (
+    router as cashflow_router,
+    my_requests as cashflow_my_requests,
+    withdraw_act as cashflow_withdraw_act,
+    withdraw_act_xlsx as cashflow_withdraw_act_xlsx,
+)
 
 APP.include_router(cashflow_router)
+
+def _ensure_cashflow_routes() -> None:
+    existing_paths = {route.path for route in APP.routes}
+    if "/api/cashflow/requests/my" not in existing_paths:
+        APP.add_api_route(
+            "/api/cashflow/requests/my",
+            cashflow_my_requests,
+            methods=["GET"],
+        )
+    if "/api/cashflow/withdraw-act" not in existing_paths:
+        APP.add_api_route(
+            "/api/cashflow/withdraw-act",
+            cashflow_withdraw_act,
+            methods=["GET"],
+        )
+    if "/api/cashflow/withdraw-act.xlsx" not in existing_paths:
+        APP.add_api_route(
+            "/api/cashflow/withdraw-act.xlsx",
+            cashflow_withdraw_act_xlsx,
+            methods=["GET"],
+        )
+
+_ensure_cashflow_routes()
 
 
 @APP.exception_handler(Exception)
