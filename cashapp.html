@@ -425,17 +425,20 @@
         const isSignerUser = API.user?.role === 'cash_signer';
         const isAdminParticipant = Boolean(mePart && mePart.is_admin && isAdminUser);
         const isClosed = r.status === 'FINAL' || r.status === 'CANCELLED';
-        const canSignerAct = !isClosed && (
-          (mePart && !mePart.is_admin && (mePart.state === 'PENDING'))
-          || (!mePart && isSignerUser)
+        const attempt = Number(r.attempt || 1);
+        const signerParticipant = Boolean(mePart && !mePart.is_admin);
+        const sigAttempt1 = mePart?.attempt1;
+        const sigAttempt2 = mePart?.attempt2;
+        const hasDecision = attempt === 2 ? Boolean(sigAttempt2) : Boolean(sigAttempt1);
+        const refusedOnAttempt1 = Boolean(sigAttempt1 && sigAttempt1.decision === 'REFUSED');
+        const canSignerAct = !isClosed && signerParticipant && (
+          (attempt === 1 && !hasDecision)
+          || (attempt === 2 && !hasDecision && refusedOnAttempt1)
         );
-        const needsRetry = !isClosed && r.attempt === 2 && (
-          (mePart && !mePart.is_admin && (mePart.state === 'REFUSED_NEEDS_RETRY'))
-          || (!mePart && isSignerUser)
-        );
+        const needsRetry = !isClosed && attempt === 2 && signerParticipant && !hasDecision && refusedOnAttempt1;
         const canAdminAct = !isClosed && isAdminParticipant && mePart && (mePart.state === 'PENDING');
 
-        const actAllowed = canSignerAct || needsRetry || canAdminAct;
+        const actAllowed = canSignerAct || needsRetry || canAdminAct || (!mePart && isSignerUser);
 
         const wrap = document.createElement('div');
         wrap.innerHTML = `
