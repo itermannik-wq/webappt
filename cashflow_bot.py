@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import os
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
@@ -61,8 +62,22 @@ def get_bot() -> Bot:
     return _BOT
 
 
-def _cashapp_kb(cfg: CashflowBotConfig, request_id: int) -> InlineKeyboardMarkup:
-    url = f"{cfg.cashapp_url}?rid={int(request_id)}"
+def require_https_webapp_url(url: str) -> Optional[str]:
+    if not url:
+        return None
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return None
+    if parsed.scheme.lower() != "https":
+        return None
+    return url
+
+
+def _cashapp_kb(cfg: CashflowBotConfig, request_id: int) -> Optional[InlineKeyboardMarkup]:
+    url = require_https_webapp_url(f"{cfg.cashapp_url}?rid={int(request_id)}")
+    if not url:
+        return None
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Открыть и подтвердить", web_app=WebAppInfo(url=url))]]
     )

@@ -2110,7 +2110,9 @@ def get_user_role_from_db(telegram_id: int) -> str:
 
 def main_menu_kb(role: str) -> InlineKeyboardMarkup:
     if role == "cash_signer":
-        cashapp_url = f"{CFG.APP_URL.rstrip('/')}/cashapp"
+        cashapp_url = require_https_webapp_url(f"{CFG.APP_URL.rstrip('/')}/cashapp")
+        if not cashapp_url:
+            return InlineKeyboardMarkup(inline_keyboard=[])
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Наличные / Подписи", web_app=WebAppInfo(url=cashapp_url))],
