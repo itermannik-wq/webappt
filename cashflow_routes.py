@@ -51,8 +51,15 @@ def _app_get_current_user():
 
 
 def _app_require_role(*roles: str):
-    from app import require_role  # lazy
-    return require_role(*roles)
+    def _dep(request: Request):
+        from app import get_current_user  # lazy
+        u = get_current_user(request)
+        role = str(u["role"])
+        if role not in roles:
+            raise HTTPException(status_code=403, detail="Insufficient role")
+        return u
+
+    return _dep
 
 
 def _get_cfg_paths() -> Dict[str, Any]:
