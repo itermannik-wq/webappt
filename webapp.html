@@ -619,11 +619,36 @@
       font-size: 11px;
       color: var(--muted2);
     }
+    .metricHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 8px;
+    }
     .metric.factBalance{
       position: relative;
       border: 1px solid rgba(16,185,129,.35);
       background: linear-gradient(150deg, rgba(16,185,129,.08), rgba(16,185,129,.02));
       overflow: hidden;
+    }
+    .metric.subAccount{
+      border: 1px solid rgba(59,130,246,.35);
+      background: linear-gradient(150deg, rgba(59,130,246,.08), rgba(59,130,246,.02));
+    }
+    .metricBadge{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(59,130,246,.35);
+      background: rgba(59,130,246,.12);
+      font-size: 10px;
+      font-weight: 600;
+      color: rgba(147,197,253,.95);
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      white-space: nowrap;
     }
     .metric.factBalance::after{
       content:"";
@@ -691,6 +716,20 @@
       background: var(--card2);
       font-size: 12px;
       color: var(--muted);
+      white-space: nowrap;
+    }
+    .accountBadge{
+      display:inline-flex;
+      align-items:center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,.35);
+      background: rgba(148,163,184,.12);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .3px;
+      text-transform: uppercase;
       white-space: nowrap;
     }
     #expWarn{
@@ -1866,6 +1905,25 @@
             <div class="sub">остаток + баланс</div>
           </div>
         </div>
+
+        <div class="grid2" style="margin-top:12px;">
+          <div class="card metric subAccount">
+            <div class="metricHeader">
+              <div class="label">Счет: Прославление</div>
+              <span class="metricBadge">Доп. счет</span>
+            </div>
+            <div id="praiseBalance" class="value mono">—</div>
+            <div class="sub">накопительный остаток</div>
+          </div>
+          <div class="card metric subAccount">
+            <div class="metricHeader">
+              <div class="label">Счет: Альфа курс</div>
+              <span class="metricBadge">Доп. счет</span>
+            </div>
+            <div id="alphaBalance" class="value mono">—</div>
+            <div class="sub">накопительный остаток</div>
+          </div>
+        </div>
       </div>
 
       <div class="section">
@@ -2194,6 +2252,21 @@
               </select>
             </div>
             <div class="field">
+              <label>Счет</label>
+              <div id="donAccountDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="donAccount" class="input hiddenSelect" tabindex="-1" aria-hidden="true">
+                <option value="main">Основной</option>
+                <option value="praise">Прославление</option>
+                <option value="alpha">Альфа курс</option>
+              </select>
+            </div>
+            <div class="field">
               <label>Безнал</label>
               <input id="donCashless" class="input" type="number" inputmode="decimal" placeholder="0.00" />
             </div>
@@ -2257,6 +2330,22 @@
             <div class="field">
               <label>Дата</label>
               <input id="expDate" class="input" type="date" />
+            </div>
+
+            <div class="field">
+              <label>Счет списания</label>
+              <div id="expAccountDropdown" class="dropdown">
+                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="dropdownValue">—</span>
+                  <span class="icon">expand_more</span>
+                </button>
+                <div class="dropdownPanel" role="listbox"></div>
+              </div>
+              <select id="expAccount" class="input hiddenSelect" tabindex="-1" aria-hidden="true">
+                <option value="main">Основной</option>
+                <option value="praise">Прославление</option>
+                <option value="alpha">Альфа курс</option>
+              </select>
             </div>
 
             <div class="field">
@@ -3678,10 +3767,13 @@
       const unit = payload.unit_amount ?? 0;
       const comment = payload.comment || "";
       const tags = payload.tags || [];
+      const account = payload.account || "main";
 
       switchScreen("add");
       setAddTab("exp");
       $("#expDate").value = date;
+      $("#expAccount").value = account;
+      syncDropdown("expAccount");
       ensureExpenseCategoryOption(category);
       $("#expCategory").value = category;
       syncDropdown("expCategory");
@@ -3705,7 +3797,8 @@
       const commentRaw = ($("#expComment").value || "").trim();
       const comment = commentRaw ? commentRaw : null;
       const tags = State.expenseTags.length ? State.expenseTags : null;
-      return { expense_date: date, category, title, qty, unit_amount, comment, tags };
+      const account = $("#expAccount").value || "main";
+      return { expense_date: date, category, title, qty, unit_amount, comment, tags, account };
     }
     function renderDraftsList(){
       const list = $("#draftsList");
@@ -4118,6 +4211,8 @@
       $("#mSDDR").textContent = "—";
       $("#mPSDPM").textContent = "—";
       $("#mnspsBadge").textContent = "—";
+      $("#praiseBalance").textContent = "—";
+      $("#alphaBalance").textContent = "—";
       $("#expenseSum").textContent = "—";
       $("#lastExpensesList").innerHTML = "";
       $("#sundayBadges").innerHTML = "";
@@ -4197,6 +4292,8 @@
       $("#mExpenses").textContent = fmtMoney(s.month_expenses_sum);
       $("#mBalance").textContent = fmtMoney(s.month_balance);
       $("#mFactBalance").textContent = fmtMoney(s.fact_balance);
+      $("#praiseBalance").textContent = fmtMoney(s.subaccounts?.praise?.balance ?? 0);
+      $("#alphaBalance").textContent = fmtMoney(s.subaccounts?.alpha?.balance ?? 0);
 
       // ring
       const pct = Math.round((Number(s.monthly_completion || 0) * 100) * 10) / 10;
@@ -4852,8 +4949,8 @@
       if (q) {
         items = items.filter(x=>{
           const hay = State.historyMode === "don"
-            ? `${x.service_date} ${x.idx} ${x.mnsps_status} ${x.income_type || "donation"}`
-            : `${x.title||""} ${x.comment||""} ${x.category||""} ${(x.tags || []).join(" ")} ${x.expense_date||""}`;
+            ? `${x.service_date} ${x.idx} ${x.mnsps_status} ${x.income_type || "donation"} ${x.account || "main"}`
+            : `${x.title||""} ${x.comment||""} ${x.category||""} ${(x.tags || []).join(" ")} ${x.expense_date||""} ${x.account || "main"}`;
           return hay.toLowerCase().includes(q);
         });
       }
@@ -4887,6 +4984,22 @@
       }
     }
 
+    const ACCOUNT_LABELS = {
+      main: "Основной",
+      praise: "Прославление",
+      alpha: "Альфа курс",
+    };
+
+    function accountLabel(account){
+      return ACCOUNT_LABELS[account] || "Основной";
+    }
+
+    function renderAccountBadge(account){
+      if (!account || account === "main") return "";
+      return `<span class="accountBadge">${escapeHtml(accountLabel(account))}</span>`;
+    }
+
+
     function makeDonationItem(s){
       const total = Number(s.total||0);
       const incomeType = (s.income_type || "donation");
@@ -4898,13 +5011,14 @@
       const sub = isDonation
         ? `${fmtLongDate(s.service_date)} • ${s.mnsps_status} • ПВС ${(Number(s.pvs_ratio||0)*100).toFixed(1)}%`
         : `${fmtLongDate(s.service_date)} • Иной доход`;
+      const accountBadge = renderAccountBadge(s.account);
       const div = document.createElement("div");
       div.className = "item";
       div.innerHTML = `
         <div class="itemLeft">
           <div class="itemIco"><span class="icon">${iconName}</span></div>
           <div class="itemText">
-            <div class="t">${isDonation ? `Воскресенье #${s.idx || "—"}` : "Иной доход"}</div>
+            <div class="t">${isDonation ? `Воскресенье #${s.idx || "—"}` : "Иной доход"} ${accountBadge}</div>
             <div class="s">${sub}</div>
           </div>
         </div>
@@ -4923,6 +5037,7 @@
       const sub = compact
         ? `${fmtLongDate(e.expense_date)} • ${e.category}`
         : `${fmtLongDate(e.expense_date)} • ${e.category}${e.is_system ? " • системная" : ""}`;
+      const accountBadge = renderAccountBadge(e.account);
       const attachCount = Number(e.attachments_count || 0);
       const tagsHtml = renderTagChipsInline(e.tags || []);
       const div = document.createElement("div");
@@ -4931,7 +5046,7 @@
         <div class="itemLeft">
           <div class="itemIco"><span class="icon">${ico}</span></div>
           <div class="itemText">
-            <div class="t">${escapeHtml(e.title || "Расход")}</div>
+            <div class="t">${escapeHtml(e.title || "Расход")} ${accountBadge}</div>
             ${tagsHtml}
             <div class="s">${escapeHtml(sub)}</div>
           </div>
@@ -5241,9 +5356,15 @@
       return ($("#donIncomeType").value || "donation").trim();
     }
 
+    function getDonationAccount(){
+      return ($("#donAccount").value || "main").trim();
+    }
+
+
     function setDonationTypeUI(){
       const type = getDonationType();
       syncDropdown("donIncomeType");
+      syncDropdown("donAccount");
       const isDonation = type === "donation";
       $("#donSundayWrap").classList.toggle("hidden", !isDonation);
       $("#donOtherDateWrap").classList.toggle("hidden", isDonation);
@@ -5264,6 +5385,7 @@
     function updateDonationDateUI(){
       const type = getDonationType();
       const isDonation = type === "donation";
+      const account = getDonationAccount();
       let d = isDonation ? State.sundayDates[State.sundayIndex] : $("#donOtherDate").value;
       if (!isDonation && !d) {
         d = State.otherIncomeDate || toIsoDateLocal(new Date());
@@ -5274,7 +5396,7 @@
       }
 
       // prefill from existing service
-      const svc = State.services.find(x=>x.service_date === d && (x.income_type || "donation") === type);
+      const svc = State.services.find(x=>x.service_date === d && (x.income_type || "donation") === type && (x.account || "main") === account);
       const cashless = svc ? Number(svc.cashless||0) : 0;
       const cash = svc ? Number(svc.cash||0) : 0;
       $("#donCashless").value = cashless ? String(cashless) : "";
@@ -5289,13 +5411,17 @@
       $("#donTotal").value = fmtMoney(total);
 
       const type = getDonationType();
+      const account = getDonationAccount();
       const isDonation = type === "donation";
-      const weeklyMin = isDonation ? Number(State.summary?.weekly_min_needed || 0) : 0;
+      const weeklyMin = (isDonation && account === "main") ? Number(State.summary?.weekly_min_needed || 0) : 0;
       $("#donWeeklyMin").textContent = weeklyMin ? fmtMoney(weeklyMin) : "—";
 
       let status = "—";
       let cls = "";
-      if (isDonation && weeklyMin > 0) {
+      if (account !== "main") {
+        status = "Доп. счет";
+        $("#donPvs").textContent = "—";
+      } else if (isDonation && weeklyMin > 0) {
         if (total > weeklyMin) { status="Собрана"; cls="ok"; }
         else { status="Не собрана"; cls=(total>0?"warn":"bad"); }
         const pvs = total / weeklyMin;
@@ -5315,10 +5441,11 @@
 
     async function copyPreviousSunday(){
       if (getDonationType() !== "donation") return;
+      if (getDonationAccount() !== "main") return;
       const idx = State.sundayIndex;
       if (idx <= 0) return;
       const prevDate = State.sundayDates[idx-1];
-      const prev = State.services.find(x=>x.service_date === prevDate && (x.income_type || "donation") === "donation");
+      const prev = State.services.find(x=>x.service_date === prevDate && (x.income_type || "donation") === "donation" && (x.account || "main") === "main");
       if (!prev) return;
       $("#donCashless").value = String(Number(prev.cashless||0));
       $("#donCash").value = String(Number(prev.cash||0));
@@ -5348,6 +5475,8 @@
       warn.classList.add("hidden");
       updateExpenseBudgetIndicator();
       if (!State.summary) return;
+      const account = $("#expAccount").value || "main";
+      if (account !== "main") return;
 
       const total = Number($("#expQty").value||0) * Number($("#expUnit").value||0);
       const fact = Number(State.summary.fact_balance||0);
@@ -5378,6 +5507,10 @@
       indicator.classList.add("hidden");
       warn.classList.add("hidden");
       indicator.classList.remove("warn","over");
+
+      const account = $("#expAccount").value || "main";
+      if (account !== "main") return;
+
 
       const category = ($("#expCategory").value || "").trim();
       if (!category) return;
@@ -5521,6 +5654,11 @@
       Edit.item = JSON.parse(JSON.stringify(item)); // clone
       Edit.tags = (type === "expense") ? normalizeTagList(item.tags || []) : [];
       const serviceType = (type === "service") ? (item.income_type || "donation") : null;
+      const accountOptions = [
+        {value:"main", label:"Основной"},
+        {value:"praise", label:"Прославление"},
+        {value:"alpha", label:"Альфа курс"},
+      ];
       $("#editTitle").textContent = (type==="service")
         ? (serviceType === "donation" ? "Пожертвование" : "Иной доход")
         : "Расход";
@@ -5561,12 +5699,17 @@
             {field:"income_type"}
           )
         ));
+        body.appendChild(makeField(
+          "Счет",
+          makeSelect(accountOptions, item.account || "main", {field:"account"})
+        ));
         body.appendChild(makeField("Безнал", makeInput("number", item.cashless, {step:"0.01", field:"cashless"})));
         body.appendChild(makeField("Наличные", makeInput("number", item.cash, {step:"0.01", field:"cash"})));
         const total = Number(item.cashless||0) + Number(item.cash||0);
         body.appendChild(makeField("Итого", makeInput("text", fmtMoney(total), {readonly:true})));
       } else {
         body.appendChild(makeField("Дата", makeInput("date", item.expense_date)));
+        body.appendChild(makeField("Счет", makeSelect(accountOptions, item.account || "main")));
         body.appendChild(makeField("Категория", makeInput("text", item.category)));
         body.appendChild(makeField("Название", makeInput("text", item.title)));
         body.appendChild(makeField("Количество", makeInput("number", item.qty, {step:"0.01"})));
@@ -5714,13 +5857,15 @@
       if (Edit.type === "service"){
         const dateI = $("#editBody .input[data-field='service_date']");
         const typeI = $("#editBody .input[data-field='income_type']");
+        const accountI = $("#editBody .input[data-field='account']");
         const cashlessI = $("#editBody .input[data-field='cashless']");
         const cashI = $("#editBody .input[data-field='cash']");
         const body = {
           service_date: dateI.value,
           cashless: Number(cashlessI.value||0),
           cash: Number(cashI.value||0),
-          income_type: (typeI?.value || "donation")
+          income_type: (typeI?.value || "donation"),
+          account: (accountI?.value || "main")
         };
         await API.put(`/api/services/${Edit.item.id}`, body);
         closeEditModal();
@@ -5732,7 +5877,7 @@
       // expense
       if (Number(Edit.item.is_system||0) === 1) return;
       const controls = $$("#editBody .input");
-      const [dateI, catI, titleI, qtyI, unitI, totalI, commentI] = controls;
+      const [dateI, accountI, catI, titleI, qtyI, unitI, totalI, commentI] = controls;
       const body = {
         expense_date: dateI.value,
         category: catI.value.trim() || "Прочее",
@@ -5740,7 +5885,8 @@
         qty: Number(qtyI.value||1),
         unit_amount: Number(unitI.value||0),
         comment: (commentI.value||"").trim() || null,
-        tags: Edit.tags || []
+        tags: Edit.tags || [],
+        account: (accountI?.value || "main")
       };
       await API.put(`/api/expenses/${Edit.item.id}`, body);
       closeEditModal();
@@ -5788,6 +5934,8 @@
         switchScreen("add");
         setAddTab("don");
         $("#donIncomeType").value = (Edit.item.income_type || "donation");
+        $("#donAccount").value = (Edit.item.account || "main");
+        syncDropdown("donAccount");
         setDonationTypeUI();
         if ((Edit.item.income_type || "donation") === "donation") {
           selectDonationSundayByDate(Edit.item.service_date);
@@ -5814,7 +5962,8 @@
         qty: Number(Edit.item.qty||1),
         unit_amount: Number(Edit.item.unit_amount||0),
         comment: Edit.item.comment || null,
-        tags: Edit.tags || []
+        tags: Edit.tags || [],
+        account: Edit.item.account || "main"
       };
       await API.post(`/api/months/${State.monthId}/expenses`, body);
       closeEditModal();
@@ -6777,12 +6926,14 @@
 
       const cashless = Number($("#donCashless").value||0);
       const cash = Number($("#donCash").value||0);
+      const account = $("#donAccount").value || "main";
 
       await API.post(`/api/months/${State.monthId}/services`, {
         service_date: d,
         cashless,
         cash,
-        income_type: type
+        income_type: type,
+        account
       });
       setToast("Сохранено");
       await refreshAll();
@@ -6816,6 +6967,7 @@
       const unit = Number($("#expUnit").value||0);
       const comment = ($("#expComment").value||"").trim() || null;
       const tags = State.expenseTags.length ? State.expenseTags : [];
+      const account = $("#expAccount").value || "main";
 
       const balanceWarn = !$("#expWarn").classList.contains("hidden");
       const budgetWarn = !$("#expBudgetWarn").classList.contains("hidden");
@@ -6839,7 +6991,8 @@
         qty,
         unit_amount: unit,
         comment,
-        tags
+        tags,
+        account
       });
       const budgetOver = (created?.warnings || []).find((w)=> w.type === "budget_over");
       if (budgetOver){
@@ -7135,6 +7288,7 @@
       $("#donCashless").addEventListener("input", recalcDonationTotals);
       $("#donCash").addEventListener("input", recalcDonationTotals);
       $("#donIncomeType").addEventListener("change", setDonationTypeUI);
+      $("#donAccount").addEventListener("change", updateDonationDateUI);
       $("#donOtherDate").addEventListener("change", ()=>{
         State.otherIncomeDate = $("#donOtherDate").value;
         updateDonationDateUI();
@@ -7168,6 +7322,7 @@
       $("#expQty").addEventListener("input", recalcExpenseTotals);
       $("#expUnit").addEventListener("input", recalcExpenseTotals);
       $("#expCategory").addEventListener("change", updateWarningsExpenseForm);
+      $("#expAccount").addEventListener("change", updateWarningsExpenseForm);
       $("#expTemplate").addEventListener("change", (e)=> applyTemplate(e.target.value));
       $("#expTagsAddBtn").addEventListener("click", ()=>{
         openTagPicker({
@@ -7480,6 +7635,8 @@
 
       wireEvents();
       initDropdownFromSelect("donIncomeType", "donIncomeTypeDropdown");
+      initDropdownFromSelect("donAccount", "donAccountDropdown");
+      initDropdownFromSelect("expAccount", "expAccountDropdown");
       initDropdownFromSelect("expCategory", "expCategoryDropdown");
       initDropdownFromSelect("expTemplate", "expTemplateDropdown");
       initDropdownFromSelect("histMonthSelect", "histMonthDropdown");

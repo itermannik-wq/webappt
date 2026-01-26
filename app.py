@@ -234,9 +234,9 @@ def init_db() -> None:
             mnsps_status TEXT NOT NULL DEFAULT 'Не собрана',
             pvs_ratio REAL NOT NULL DEFAULT 0,
             income_type TEXT NOT NULL DEFAULT 'donation',
-            account TEXT NOT NULL DEFAULT 'main',
+            account TEXT NOT NULL DEFAULT 'main',            
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,         
+            updated_at TEXT NOT NULL,
             UNIQUE(month_id, service_date, account, income_type),
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
         );
@@ -256,7 +256,7 @@ def init_db() -> None:
             total REAL NOT NULL DEFAULT 0,
             comment TEXT,
             is_system INTEGER NOT NULL DEFAULT 0,
-            account TEXT NOT NULL DEFAULT 'main',
+            account TEXT NOT NULL DEFAULT 'main',           
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
@@ -1337,6 +1337,7 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
             SELECT COALESCE(SUM(total),0) AS s
             FROM services
             WHERE month_id=?
+              AND account='main'            
               AND (income_type='donation' OR income_type IS NULL)
             """,
             (month_id,),
@@ -1361,7 +1362,8 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
         db_exec(
             """
             UPDATE expenses
-            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, account='main', updated_at=?
+            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, updated_at=?
+            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, account='main', updated_at=?            
             WHERE id=?;
             """,
             (iso_date(tithe_date), category, tithe_amount, tithe_amount, now, existing["id"]),
@@ -1490,7 +1492,6 @@ def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str,
             )["s"]
         )
         subaccounts[account] = {"balance": round(income - expenses, 2)}
-
 
 
     return {
@@ -2466,7 +2467,7 @@ async def on_confirm(cq: CallbackQuery):
                 """
                 INSERT INTO services (
                     month_id, service_date, idx, cashless, cash, total,
-                    weekly_min_needed, mnsps_status, pvs_ratio, account, income_type,
+                    weekly_min_needed, mnsps_status, pvs_ratio,
                     created_at, updated_at
                 ) VALUES (?, ?, 1, ?, ?, ?, 0, 'Не собрана', 0, 'main', 'donation', ?, ?);
                 """,
