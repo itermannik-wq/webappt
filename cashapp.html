@@ -431,14 +431,16 @@
         const sigAttempt2 = mePart?.attempt2;
         const hasDecision = attempt === 2 ? Boolean(sigAttempt2) : Boolean(sigAttempt1);
         const refusedOnAttempt1 = Boolean(sigAttempt1 && sigAttempt1.decision === 'REFUSED');
+        const pendingFromAttempt1 = !sigAttempt1;
         const canSignerAct = !isClosed && signerParticipant && (
           (attempt === 1 && !hasDecision)
-          || (attempt === 2 && !hasDecision && refusedOnAttempt1)
+          || (attempt === 2 && !hasDecision && (refusedOnAttempt1 || pendingFromAttempt1))
         );
         const needsRetry = !isClosed && attempt === 2 && signerParticipant && !hasDecision && refusedOnAttempt1;
         const canAdminAct = !isClosed && isAdminParticipant && mePart && (mePart.state === 'PENDING');
 
         const actAllowed = canSignerAct || needsRetry || canAdminAct || (!mePart && isSignerUser);
+
 
         const wrap = document.createElement('div');
         wrap.innerHTML = `
