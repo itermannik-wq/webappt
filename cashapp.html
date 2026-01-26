@@ -419,27 +419,22 @@
         const data = await API.get(`/api/cashflow/requests/${id}`);
         const r = data.request;
         const parts = data.participants || [];
-        const meId = API.user?.telegram_id ?? tg?.initDataUnsafe?.user?.id ?? API.user?.id;
-        const mePart = parts.find(p=> String(p.telegram_id) === String(meId));
+        const meId = Number(API.user?.telegram_id ?? tg?.initDataUnsafe?.user?.id ?? API.user?.id);
+        const mePart = parts.find(p=> Number(p.telegram_id) === meId);
         const isAdminUser = API.user?.role === 'admin';
         const isSignerUser = API.user?.role === 'cash_signer';
         const isAdminParticipant = Boolean(mePart && mePart.is_admin && isAdminUser);
         const isClosed = r.status === 'FINAL' || r.status === 'CANCELLED';
-        const attempt = Number(r.attempt || 1);
         const signerParticipant = Boolean(mePart && !mePart.is_admin);
-        const sigAttempt1 = mePart?.attempt1;
-        const sigAttempt2 = mePart?.attempt2;
-        const hasDecision = attempt === 2 ? Boolean(sigAttempt2) : Boolean(sigAttempt1);
-        const refusedOnAttempt1 = Boolean(sigAttempt1 && sigAttempt1.decision === 'REFUSED');
-        const pendingFromAttempt1 = !sigAttempt1;
+        const signerState = mePart?.state;
         const canSignerAct = !isClosed && signerParticipant && (
-          (attempt === 1 && !hasDecision)
-          || (attempt === 2 && !hasDecision && (refusedOnAttempt1 || pendingFromAttempt1))
+          signerState === 'PENDING' || signerState === 'REFUSED_NEEDS_RETRY'
         );
-        const needsRetry = !isClosed && attempt === 2 && signerParticipant && !hasDecision && refusedOnAttempt1;
-        const canAdminAct = !isClosed && isAdminParticipant && mePart && (mePart.state === 'PENDING');
 
-        const actAllowed = canSignerAct || needsRetry || canAdminAct || (!mePart && isSignerUser);
+        const canAdminAct = !isClosed && isAdminParticipant && mePart && (signerState === 'PENDING');
+
+
+        const actAllowed = canSignerAct || canAdminAct || (!mePart && isSignerUser);
 
 
         const wrap = document.createElement('div');
