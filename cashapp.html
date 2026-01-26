@@ -213,7 +213,11 @@
             try{ API.user = JSON.parse(localStorage.getItem('cashflowUser')||'null'); }catch{}
           }
           if (!API.token) return API.auth();
-          try{ await API.get('/api/me'); }
+          try{
+            const me = await API.get('/api/me');
+            API.user = me;
+            localStorage.setItem('cashflowUser', JSON.stringify(API.user));
+          }
           catch{ return API.auth(); }
         },
         async req(path, opts={}){
