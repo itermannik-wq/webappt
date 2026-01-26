@@ -422,10 +422,17 @@
         const meId = API.user?.telegram_id ?? tg?.initDataUnsafe?.user?.id ?? API.user?.id;
         const mePart = parts.find(p=> String(p.telegram_id) === String(meId));
         const isAdminUser = API.user?.role === 'admin';
+        const isSignerUser = API.user?.role === 'cash_signer';
         const isAdminParticipant = Boolean(mePart && mePart.is_admin && isAdminUser);
         const isClosed = r.status === 'FINAL' || r.status === 'CANCELLED';
-        const canSignerAct = !isClosed && mePart && !mePart.is_admin && (mePart.state === 'PENDING');
-        const needsRetry = !isClosed && r.attempt === 2 && mePart && !mePart.is_admin && (mePart.state === 'REFUSED_NEEDS_RETRY');
+        const canSignerAct = !isClosed && (
+          (mePart && !mePart.is_admin && (mePart.state === 'PENDING'))
+          || (!mePart && isSignerUser)
+        );
+        const needsRetry = !isClosed && r.attempt === 2 && (
+          (mePart && !mePart.is_admin && (mePart.state === 'REFUSED_NEEDS_RETRY'))
+          || (!mePart && isSignerUser)
+        );
         const canAdminAct = !isClosed && isAdminParticipant && mePart && (mePart.state === 'PENDING');
 
         const actAllowed = canSignerAct || needsRetry || canAdminAct;

@@ -2002,6 +2002,8 @@ def get_current_user(request: Request) -> sqlite3.Row:
     if not telegram_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
+    # обновляем allowlist, чтобы роли в БД не отставали от users.json
+    refresh_allowlist_if_needed()
     u = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (telegram_id,))
     if not u or int(u["active"]) != 1:
         raise HTTPException(status_code=403, detail="User not allowed / inactive")
