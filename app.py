@@ -1362,8 +1362,7 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
         db_exec(
             """
             UPDATE expenses
-            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, updated_at=?
-            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, account='main', updated_at=?            
+            SET expense_date=?, category=?, qty=1, unit_amount=?, total=?, account='main', updated_at=?          
             WHERE id=?;
             """,
             (iso_date(tithe_date), category, tithe_amount, tithe_amount, now, existing["id"]),
