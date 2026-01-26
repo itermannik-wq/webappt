@@ -141,6 +141,18 @@ def require_https_webapp_url(url: str) -> Optional[str]:
         return None
     return url
 
+def cashapp_webapp_url() -> Optional[str]:
+    primary = require_https_webapp_url(f"{CFG.APP_URL.rstrip('/')}/cashapp")
+    if primary:
+        return primary
+    webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
+    if not webapp_url:
+        return None
+    parsed = urllib.parse.urlparse(webapp_url)
+    cashapp_url = parsed._replace(path="/cashapp", params="", query="", fragment="")
+    return urllib.parse.urlunparse(cashapp_url)
+
+
 
 # ---------------------------
 # DB helpers (sqlite3)
@@ -2110,7 +2122,7 @@ def get_user_role_from_db(telegram_id: int) -> str:
 
 def main_menu_kb(role: str) -> InlineKeyboardMarkup:
     if role == "cash_signer":
-        cashapp_url = require_https_webapp_url(f"{CFG.APP_URL.rstrip('/')}/cashapp")
+        cashapp_url = cashapp_webapp_url()
         if not cashapp_url:
             return InlineKeyboardMarkup(inline_keyboard=[])
         return InlineKeyboardMarkup(
@@ -2324,7 +2336,7 @@ async def on_start(m: Message):
         reply_markup=main_menu_kb(role),
     )
     webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
-    cashapp_url = require_https_webapp_url(f"{CFG.APP_URL.rstrip('/')}/cashapp")
+    cashapp_url = cashapp_webapp_url()
     if not webapp_url or (role == "cash_signer" and not cashapp_url):
         await m.answer(
             "Внимание: WebApp-кнопки доступны только по HTTPS.\n"

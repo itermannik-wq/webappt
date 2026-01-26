@@ -35,6 +35,7 @@ class CashflowBotConfig:
     """Параметры ссылок для WebApp."""
 
     app_url: str
+    webapp_url: str = ""
     cashapp_path: str = "/cashapp"
 
     @property
@@ -48,7 +49,10 @@ class CashflowBotConfig:
 
 def load_bot_config() -> CashflowBotConfig:
     # В app.py уже есть APP_URL в .env; берём то же.
-    return CashflowBotConfig(app_url=os.getenv("APP_URL", "http://localhost:8000").strip())
+    return CashflowBotConfig(
+        app_url=os.getenv("APP_URL", "http://localhost:8000").strip(),
+        webapp_url=os.getenv("WEBAPP_URL", "").strip(),
+    )
 
 
 def set_bot(bot: Bot) -> None:
@@ -75,13 +79,27 @@ def require_https_webapp_url(url: str) -> Optional[str]:
 
 
 def _cashapp_kb(cfg: CashflowBotConfig, request_id: int) -> Optional[InlineKeyboardMarkup]:
-    url = require_https_webapp_url(f"{cfg.cashapp_url}?rid={int(request_id)}")
+    url = _cashapp_url(cfg, request_id)
     if not url:
         return None
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Открыть и подтвердить", web_app=WebAppInfo(url=url))]]
     )
 
+def _cashapp_url(cfg: CashflowBotConfig, request_id: int) -> Optional[str]:
+    primary = require_https_webapp_url(f"{cfg.cashapp_url}?rid={int(request_id)}")
+    if primary:
+        return primary
+    webapp_url = require_https_webapp_url(cfg.webapp_url)
+    if not webapp_url:
+        return None
+    parsed = urllib.parse.urlparse(webapp_url)
+    path = cfg.cashapp_path or "/cashapp"
+    if not path.startswith("/"):
+        path = "/" + path
+    base = parsed._replace(path=path, params="", query="", fragment="")
+    cashapp_base = urllib.parse.urlunparse(base)
+    return require_https_webapp_url(f"{cashapp_base}?rid={int(request_id)}")
 
 def format_account(account: str) -> str:
     a = (account or "").lower()
