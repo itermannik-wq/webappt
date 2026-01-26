@@ -656,6 +656,7 @@
       white-space: nowrap;
       max-width: 100%;
       align-self: flex-start;
+      transform: translateY(-6px);
     }
     .metric.factBalance::after{
       content:"";
@@ -1413,6 +1414,17 @@
     .input[readonly]{ color: var(--muted); }
     .input.hiddenSelect{
       display: none;
+    }
+    .sigPad{
+      width: 100%;
+      height: 160px;
+      border-radius: 12px;
+      border: 1px dashed var(--stroke);
+      background: rgba(0,0,0,0.03);
+      touch-action: none;
+    }
+    html[data-theme="dark"] .sigPad{
+      background: rgba(255,255,255,0.03);
     }
 
     .dropdown{
@@ -2759,6 +2771,129 @@
                     <div class="tiny muted2" style="margin-top:8px;">Откроется в браузере Telegram (скачивание зависит от клиента).</div>
                   </div>
                 </div>
+
+                <div class="section" id="cashflowSection">
+                  <div class="sectionHeader"><h3>Наличные / Подписи</h3></div>
+                  <div class="card bigCard">
+                    <div class="tabs" id="cashflowTabs" style="margin-bottom:12px;">
+                      <button class="tab active" id="cashflowTabRequests" type="button">Запросы</button>
+                      <button class="tab" id="cashflowTabAct" type="button">Акт изъятия</button>
+                    </div>
+
+                    <div id="cashflowRequestsPanel">
+                      <div class="section" style="padding:0;">
+                        <div class="sectionHeader">
+                          <h3>Создать запрос</h3>
+                        </div>
+                        <div class="form">
+                          <div class="grid2">
+                            <div class="field">
+                              <label>Счёт</label>
+                              <select id="cashflowCreateAccount" class="input">
+                                <option value="main">MAIN • Основной</option>
+                                <option value="praise">PRAISE • Прославление</option>
+                                <option value="alpha">ALPHA • Альфа курс</option>
+                              </select>
+                            </div>
+                            <div class="field">
+                              <label>Операция</label>
+                              <select id="cashflowCreateOp" class="input">
+                                <option value="collect">Сбор наличных</option>
+                                <option value="withdraw">Изъятие наличных</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div class="grid2">
+                            <div class="field">
+                              <label>Сумма</label>
+                              <input id="cashflowCreateAmount" class="input" type="number" step="0.01" min="0" placeholder="0.00" />
+                            </div>
+                            <div class="field">
+                              <label>&nbsp;</label>
+                              <button id="cashflowCreateBtn" class="btn primary" type="button">
+                                <span class="icon">add</span> Создать запрос
+                              </button>
+                            </div>
+                          </div>
+                          <div class="tiny muted2">Запрос отправляется подписантам и требует подписи администратора.</div>
+                        </div>
+                      </div>
+
+                      <div class="divider"></div>
+                      <div class="grid2">
+                        <div class="field">
+                          <label>Счёт</label>
+                          <select id="cashflowFilterAccount" class="input">
+                            <option value="">Все</option>
+                            <option value="main">MAIN • Основной</option>
+                            <option value="praise">PRAISE • Прославление</option>
+                            <option value="alpha">ALPHA • Альфа курс</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label>Статус</label>
+                          <select id="cashflowFilterStatus" class="input">
+                            <option value="PENDING_SIGNERS">Ожидают подписантов</option>
+                            <option value="PENDING_ADMIN">Ожидают админа</option>
+                            <option value="FINAL">История (FINAL)</option>
+                            <option value="CANCELLED">История (CANCELLED)</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+                        <button id="cashflowReloadBtn" class="btn" type="button">
+                          <span class="icon">refresh</span> Обновить
+                        </button>
+                      </div>
+
+                      <div class="spacer12"></div>
+                      <div id="cashflowList" class="list"></div>
+                      <div id="cashflowDetail" class="card hidden" style="margin-top:12px;"></div>
+                    </div>
+
+                    <div id="cashflowActPanel" class="hidden">
+                      <div class="grid2">
+                        <div class="field">
+                          <label>Счёт</label>
+                          <select id="cashflowActAccount" class="input">
+                            <option value="main">MAIN • Основной</option>
+                            <option value="praise">PRAISE • Прославление</option>
+                            <option value="alpha">ALPHA • Альфа курс</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label>&nbsp;</label>
+                          <button id="cashflowActReloadBtn" class="btn" type="button">
+                            <span class="icon">refresh</span> Обновить
+                          </button>
+                        </div>
+                      </div>
+                      <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+                        <button id="cashflowActDownloadBtn" class="btn" type="button">
+                          <span class="icon">download</span> Скачать Excel
+                        </button>
+                      </div>
+                      <div class="spacer12"></div>
+                      <div style="overflow:auto;">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Дата</th>
+                              <th>Сумма Изъятия</th>
+                              <th>ФИО</th>
+                              <th>Тип пользователя</th>
+                              <th>Подпись</th>
+                            </tr>
+                          </thead>
+                          <tbody id="cashflowActBody">
+                            <tr><td colspan="5" class="muted2">Нет данных.</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
 
                 <div class="section" id="backupsSection">
                   <div class="sectionHeader"><h3>Резервные копии</h3></div>
@@ -6580,6 +6715,265 @@
       ].filter(Boolean).join("\n");
     }
 
+    /**********************
+     * Cashflow (admin/accountant)
+     **********************/
+    const CashflowState = {
+      currentId: null,
+    };
+
+    function fmtCashflowAccount(code){
+      return {
+        main: "MAIN • Основной",
+        praise: "PRAISE • Прославление",
+        alpha: "ALPHA • Альфа курс"
+      }[code] || code;
+    }
+
+    function fmtCashflowOp(op){
+      return { collect: "Сбор наличных", withdraw: "Изъятие наличных" }[op] || op;
+    }
+
+    function fmtCashflowStatus(st){
+      return {
+        PENDING_SIGNERS: "Ожидают подписантов",
+        PENDING_ADMIN: "Ожидают админа",
+        FINAL: "Завершено",
+        CANCELLED: "Отменено"
+      }[st] || st;
+    }
+
+    function createSignaturePad(){
+      const wrap = document.createElement("div");
+      const canvas = document.createElement("canvas");
+      canvas.className = "sigPad";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn small ghost";
+      btn.textContent = "Очистить";
+      wrap.appendChild(canvas);
+      wrap.appendChild(btn);
+
+      const ctx = canvas.getContext("2d");
+      let drawing = false;
+      let last = null;
+      const resize = ()=>{
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = (document.documentElement.dataset.theme === "dark") ? "#e8eefc" : "#111";
+      };
+      const pos = (e)=>{
+        const rect = canvas.getBoundingClientRect();
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      };
+      const start = (e)=>{ drawing = true; last = pos(e); };
+      const move = (e)=>{
+        if (!drawing) return;
+        const p = pos(e);
+        ctx.beginPath();
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        last = p;
+      };
+      const end = ()=>{ drawing = false; last = null; };
+
+      canvas.addEventListener("pointerdown", (e)=>{ canvas.setPointerCapture(e.pointerId); start(e); });
+      canvas.addEventListener("pointermove", move);
+      canvas.addEventListener("pointerup", end);
+      canvas.addEventListener("pointercancel", end);
+      btn.addEventListener("click", ()=> ctx.clearRect(0, 0, canvas.width, canvas.height));
+      window.addEventListener("resize", resize);
+      setTimeout(resize, 0);
+
+      return { wrap, dataUrl: ()=> canvas.toDataURL("image/png") };
+    }
+
+    function renderCashflowList(items){
+      const list = $("#cashflowList");
+      if (!list) return;
+      list.innerHTML = "";
+      if (!items.length){
+        list.innerHTML = `<div class="tiny muted2">Нет запросов.</div>`;
+        return;
+      }
+      items.forEach((item)=>{
+        const row = document.createElement("div");
+        row.className = "item";
+        row.innerHTML = `
+          <div class="rowBetween">
+            <div>
+              <div class="bold">${fmtCashflowOp(item.op_type)} • ${fmtCashflowAccount(item.account)}</div>
+              <div class="tiny muted2">${fmtCashflowStatus(item.status)} • ${escapeHtml(item.created_at || "")}</div>
+            </div>
+            <div class="bold">${Number(item.amount || 0).toFixed(2)}</div>
+          </div>
+        `;
+        row.addEventListener("click", ()=> openCashflowDetail(item.id));
+        list.appendChild(row);
+      });
+    }
+
+    async function loadCashflowRequests(){
+      const account = $("#cashflowFilterAccount")?.value || "";
+      const status = $("#cashflowFilterStatus")?.value || "";
+      const q = new URLSearchParams();
+      if (account) q.set("account", account);
+      if (status) q.set("status", status);
+      const data = await API.get(`/api/cashflow/requests?${q.toString()}`);
+      renderCashflowList(data.items || []);
+      $("#cashflowDetail")?.classList.add("hidden");
+    }
+
+    function renderCashflowParticipants(parts){
+      return parts.map((p)=>{
+        let badge = `<span class="badge">Ожидает</span>`;
+        if (p.state === "SIGNED") badge = `<span class="badge ok">Подписано</span>`;
+        if (p.state === "REFUSED_NEEDS_RETRY") badge = `<span class="badge warn">Отказ (повтор)</span>`;
+        if (p.state === "REFUSED_FINAL") badge = `<span class="badge bad">ОТКАЗ</span>`;
+        const detail = p.detail ? ` • ${escapeHtml(p.detail)}` : "";
+        return `
+          <div class="rowBetween" style="padding:6px 0; border-bottom:1px solid var(--border);">
+            <div>
+              <div class="bold">${escapeHtml(p.name)}${p.is_admin ? " (админ)" : ""}</div>
+              <div class="tiny muted2">${escapeHtml(p.role)}${detail}</div>
+            </div>
+            ${badge}
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function openCashflowDetail(id){
+      const detail = $("#cashflowDetail");
+      if (!detail) return;
+      const data = await API.get(`/api/cashflow/requests/${id}`);
+      const r = data.request;
+      const parts = data.participants || [];
+      CashflowState.currentId = r.id;
+      const refused = parts.filter((p)=> p.state === "REFUSED_NEEDS_RETRY");
+      const canResend = refused.length > 0 && State.role === "admin";
+      const canAdminSign = r.status === "PENDING_ADMIN" && State.role === "admin";
+      const canCancel = State.role === "admin" && r.status !== "FINAL" && r.status !== "CANCELLED";
+
+      detail.classList.remove("hidden");
+      detail.innerHTML = `
+        <div class="sectionHeader">
+          <h3>Запрос #${r.id}</h3>
+        </div>
+        <div class="tiny muted2" style="margin-bottom:8px;">
+          ${fmtCashflowOp(r.op_type)} • ${fmtCashflowAccount(r.account)} • ${fmtCashflowStatus(r.status)}
+        </div>
+        <div class="rowBetween" style="margin-bottom:8px;">
+          <div class="tiny muted2">Сумма</div>
+          <div class="bold">${Number(r.amount || 0).toFixed(2)}</div>
+        </div>
+        ${r.admin_comment ? `<div class="tiny muted2">Комментарий админа: ${escapeHtml(r.admin_comment)}</div>` : ""}
+        <div class="divider"></div>
+        <div class="tiny muted2" style="margin-bottom:6px;">Участники</div>
+        ${renderCashflowParticipants(parts)}
+      `;
+
+      if (canResend) {
+        const resendBlock = document.createElement("div");
+        resendBlock.className = "form";
+        resendBlock.innerHTML = `
+          <div class="divider"></div>
+          <div class="field">
+            <label>Комментарий при повторной отправке</label>
+            <input id="cashflowResendComment" class="input" type="text" placeholder="Комментарий админа" />
+          </div>
+          <button id="cashflowResendBtn" class="btn" type="button">
+            <span class="icon">send</span> Отправить повторно отказавшим
+          </button>
+        `;
+        detail.appendChild(resendBlock);
+        resendBlock.querySelector("#cashflowResendBtn").addEventListener("click", async ()=>{
+          const comment = resendBlock.querySelector("#cashflowResendComment").value || "";
+          await API.post(`/api/cashflow/requests/${r.id}/resend`, { admin_comment: comment || null });
+          await loadCashflowRequests();
+          await openCashflowDetail(r.id);
+        });
+      }
+
+      if (canAdminSign) {
+        const signBlock = document.createElement("div");
+        signBlock.className = "form";
+        const pad = createSignaturePad();
+        signBlock.innerHTML = `<div class="divider"></div><div class="bold" style="margin-bottom:6px;">Подпись администратора</div>`;
+        signBlock.appendChild(pad.wrap);
+        const btn = document.createElement("button");
+        btn.className = "btn ok";
+        btn.type = "button";
+        btn.innerHTML = `<span class="icon">check_circle</span> Подписать`;
+        btn.style.marginTop = "8px";
+        btn.addEventListener("click", async ()=>{
+          await API.post(`/api/cashflow/requests/${r.id}/admin-sign`, { signature: pad.dataUrl() });
+          await loadCashflowRequests();
+          await openCashflowDetail(r.id);
+        });
+        signBlock.appendChild(btn);
+        detail.appendChild(signBlock);
+      }
+
+      if (canCancel) {
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "btn danger";
+        cancelBtn.type = "button";
+        cancelBtn.style.marginTop = "10px";
+        cancelBtn.innerHTML = `<span class="icon">cancel</span> Отменить запрос`;
+        cancelBtn.addEventListener("click", async ()=>{
+          await API.post(`/api/cashflow/requests/${r.id}/cancel`, null);
+          await loadCashflowRequests();
+          detail.classList.add("hidden");
+        });
+        detail.appendChild(cancelBtn);
+      }
+    }
+
+    async function loadCashflowAct(){
+      const account = $("#cashflowActAccount")?.value || "main";
+      const q = new URLSearchParams();
+      if (account) q.set("account", account);
+      const data = await API.get(`/api/cashflow/withdraw-act?${q.toString()}`);
+      const body = $("#cashflowActBody");
+      if (!body) return;
+      const items = data.items || [];
+      body.innerHTML = "";
+      if (!items.length){
+        body.innerHTML = `<tr><td colspan="5" class="muted2">Нет данных.</td></tr>`;
+        return;
+      }
+      items.forEach((r)=>{
+        const sig = (r.signature_value || "").startsWith("ОТКАЗ")
+          ? r.signature_value
+          : (r.signature_path ? "Подпись" : (r.signature_value || ""));
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(r.date || "")}</td>
+          <td>${Number(r.amount || 0).toFixed(2)}</td>
+          <td>${escapeHtml(r.fio || "")}</td>
+          <td>${escapeHtml(r.user_type || "")}</td>
+          <td>${escapeHtml(sig)}</td>
+        `;
+        body.appendChild(tr);
+      });
+    }
+
+    function setCashflowTab(which){
+      const isRequests = which === "requests";
+      $("#cashflowTabRequests")?.classList.toggle("active", isRequests);
+      $("#cashflowTabAct")?.classList.toggle("active", !isRequests);
+      $("#cashflowRequestsPanel")?.classList.toggle("hidden", !isRequests);
+      $("#cashflowActPanel")?.classList.toggle("hidden", isRequests);
+    }
+
+
     async function loadMonitorList(type){
       if (!(State.role === "admin" || State.role === "accountant")) return;
       try{
@@ -6636,6 +7030,14 @@
         title: "Шаблоны",
         subtitle: "Локальные пресеты расходов",
         icon: "description",
+        rolesVisible: ["admin", "accountant"],
+        rolesEditable: ["admin", "accountant"],
+      },
+      {
+        id: "cashflowSection",
+        title: "Наличные / Подписи",
+        subtitle: "Запросы и акты изъятия",
+        icon: "payments",
         rolesVisible: ["admin", "accountant"],
         rolesEditable: ["admin", "accountant"],
       },
@@ -6749,6 +7151,10 @@
       panel.setAttribute("aria-hidden", "false");
       body.scrollTop = State.settingsScroll.page || 0;
       requestAnimationFrame(()=> panel.classList.add("open"));
+      if (sectionId === "cashflowSection"){
+        setCashflowTab("requests");
+        loadCashflowRequests().catch(()=> {});
+      }
       if (active){
         const focusable = active.querySelector("input, select, textarea, button");
         if (focusable) {
@@ -6815,6 +7221,8 @@
       });
       const themeBtn = $("#saveThemeBtn");
       if (themeBtn) themeBtn.classList.toggle("hidden", !(isAdmin || isViewer));
+      const cashflowDownloadBtn = $("#cashflowActDownloadBtn");
+      if (cashflowDownloadBtn) cashflowDownloadBtn.classList.toggle("hidden", !isAdmin);
 
       // Load server settings for admin/viewer
       if (isAdmin || isViewer){
@@ -7579,6 +7987,48 @@
           alert("Ошибка в JSON шаблонов: " + String(e.message||e));
         }
       });
+
+      $("#cashflowTabRequests").addEventListener("click", ()=>{
+        setCashflowTab("requests");
+        loadCashflowRequests().catch((e)=> alert(String(e.message||e)));
+      });
+      $("#cashflowTabAct").addEventListener("click", ()=>{
+        setCashflowTab("act");
+        loadCashflowAct().catch((e)=> alert(String(e.message||e)));
+      });
+      $("#cashflowReloadBtn").addEventListener("click", async ()=>{
+        try{
+          await loadCashflowRequests();
+          setToast("Обновлено");
+        }catch(e){ alert(String(e.message||e)); }
+      });
+      $("#cashflowActReloadBtn").addEventListener("click", async ()=>{
+        try{
+          await loadCashflowAct();
+          setToast("Обновлено");
+        }catch(e){ alert(String(e.message||e)); }
+      });
+      $("#cashflowCreateBtn").addEventListener("click", async ()=>{
+        try{
+          const account = $("#cashflowCreateAccount").value;
+          const op_type = $("#cashflowCreateOp").value;
+          const amount = Number($("#cashflowCreateAmount").value || 0);
+          if (!amount || amount <= 0){
+            alert("Сумма должна быть больше 0");
+            return;
+          }
+          await API.post("/api/cashflow/requests", { account, op_type, amount });
+          setToast("Запрос создан");
+          await loadCashflowRequests();
+        }catch(e){ alert(String(e.message||e)); }
+      });
+      $("#cashflowActDownloadBtn").addEventListener("click", ()=>{
+        const account = $("#cashflowActAccount").value || "main";
+        const q = new URLSearchParams();
+        if (account) q.set("account", account);
+        openDownload(`${API.baseUrl}/api/cashflow/withdraw-act.xlsx?${q.toString()}`);
+      });
+
 
       $("#exportCsvBtn").addEventListener("click", ()=>{
         if (!State.monthId){ alert("Месяц не выбран/не создан."); return; }

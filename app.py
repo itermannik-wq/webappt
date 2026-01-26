@@ -263,6 +263,11 @@ def init_db() -> None:
         );
         """
     )
+    # cashflow (наличные подписи)
+    import cashflow_models
+
+    with db_connect() as conn:
+        cashflow_models.init_cashflow_db(conn)
     # categories
     db_exec(
         """
@@ -1047,6 +1052,58 @@ def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
         ALLOWLIST_MTIME = mtime
         return ALLOWLIST_CACHE
     return ALLOWLIST_CACHE
+
+def create_cashflow_collect_request_if_needed(
+    *,
+    account: str,
+    cash_amount: float,
+    created_by_telegram_id: Optional[int],
+) -> Optional[int]:
+    if cash_amount <= 0:
+        return None
+    account_norm = normalize_account(account)
+    if account_norm not in ("main", "praise", "alpha"):
+        return None
+    if not created_by_telegram_id:
+        return None
+    import cashflow_models as cf
+
+    cfg_base = cf.load_cashflow_config(BASE_DIR)
+    cfg = cf.CashflowConfig(
+        base_dir=cfg_base.base_dir,
+        db_path=Path(CFG.DB_PATH),
+        users_json_path=Path(CFG.USERS_JSON_PATH),
+        uploads_dir=cfg_base.uploads_dir,
+        timezone=cfg_base.timezone,
+    )
+    with db_connect() as conn:
+        cf.init_cashflow_db(conn)
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM cash_requests
+            WHERE account=? AND op_type='collect'
+              AND status IN ('PENDING_SIGNERS','PENDING_ADMIN')
+              AND amount=? AND created_by_telegram_id=?
+            ORDER BY id DESC
+            LIMIT 1;
+            """,
+            (account_norm, float(cash_amount), int(created_by_telegram_id)),
+        ).fetchone()
+        if existing:
+            return int(existing["id"])
+
+        return cf.create_cash_request(
+            conn,
+            cfg,
+            account=account_norm,
+            op_type="collect",
+            amount=float(cash_amount),
+            created_by_telegram_id=int(created_by_telegram_id),
+            source_kind="service",
+            source_id=None,
+        )
+
 
 def register_bot_subscriber(telegram_id: int) -> None:
     now = iso_now(CFG.tzinfo())
@@ -2049,6 +2106,12 @@ def main_menu_kb(role: str) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text="Отчёты", callback_data="menu:reports")],
     ]
+    if role == "cash_signer":
+        cashapp_url = f"{CFG.APP_URL.rstrip('/')}/cashapp"
+        buttons.insert(
+            0,
+            [InlineKeyboardButton(text="Наличные / Подписи", web_app=WebAppInfo(url=cashapp_url))],
+        )
     if role == "admin":
         buttons.append([InlineKeyboardButton(text="Настройки", callback_data="menu:settings")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -2448,6 +2511,20 @@ async def on_confirm(cq: CallbackQuery):
         cashless = float(pending["cashless"])
         cash = float(pending["cash"])
         total = round(cashless + cash, 2)
+        if cash > 0:
+            request_id = create_cashflow_collect_request_if_needed(
+                account="main",
+                cash_amount=cash,
+                created_by_telegram_id=int(tid),
+            )
+            if request_id:
+                PENDING.pop(tid, None)
+                await cq.message.answer(
+                    f"Создан запрос на подтверждение наличных №{request_id}. "
+                    "Внесение возможно после подписей."
+                )
+                await cq.answer()
+                return
 
         # upsert service
         if before:
@@ -2993,6 +3070,9 @@ async def lifespan(app: FastAPI):
         token=CFG.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode="HTML")
     )
+    import cashflow_bot
+
+    cashflow_bot.set_bot(bot)
 
 
     dp = Dispatcher()
@@ -3032,6 +3112,11 @@ APP.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from cashflow_routes import router as cashflow_router
+
+APP.include_router(cashflow_router)
+
 
 @APP.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -3395,6 +3480,17 @@ def create_service(
         raise HTTPException(status_code=400, detail="Invalid income_type")
     service_date = body.service_date.isoformat()
     account = normalize_account(body.account)
+    if cash > 0:
+        request_id = create_cashflow_collect_request_if_needed(
+            account=account,
+            cash_amount=cash,
+            created_by_telegram_id=int(u["telegram_id"]),
+        )
+        if request_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cash collection requires signatures. Request #{request_id} created.",
+            )
     before = db_fetchone(
         """
         SELECT * FROM services

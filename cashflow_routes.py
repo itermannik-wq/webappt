@@ -507,9 +507,9 @@ def withdraw_act(
         rows = m.list_withdraw_act_rows(conn, account=account, date_from=date_from, date_to=date_to)
     return {"items": rows}
 
-
 @router.get("/api/cashflow/withdraw-act.xlsx")
 def withdraw_act_xlsx(
+    account: Optional[str] = Query(None, description="main|praise|alpha (опционально)"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     u=Depends(_app_require_role("admin")),
@@ -531,7 +531,7 @@ def withdraw_act_xlsx(
         raise HTTPException(status_code=501, detail=f"openpyxl is not available: {e}")
 
     with db_connect() as conn:
-        rows_all = m.list_withdraw_act_rows(conn, account=None, date_from=date_from, date_to=date_to)
+        rows_all = m.list_withdraw_act_rows(conn, account=account, date_from=date_from, date_to=date_to)
 
     wb = openpyxl.Workbook()
     # удаляем дефолтный лист
@@ -579,9 +579,21 @@ def withdraw_act_xlsx(
                 sig_cell.value = "SIGNED"
             rnum += 1
 
-    make_sheet("main", "MAIN")
-    make_sheet("praise", "PRAISE")
-    make_sheet("alpha", "ALPHA")
+    if account:
+        acc = account.strip().lower()
+        if acc not in m.ACCOUNTS:
+            raise HTTPException(status_code=400, detail="Invalid account")
+        make_sheet(acc, acc.upper())
+    else:
+        if account:
+            acc = account.strip().lower()
+            if acc not in m.ACCOUNTS:
+                raise HTTPException(status_code=400, detail="Invalid account")
+            make_sheet(acc, acc.upper())
+        else:
+            make_sheet("main", "MAIN")
+            make_sheet("praise", "PRAISE")
+            make_sheet("alpha", "ALPHA")
 
     bio = io.BytesIO()
     wb.save(bio)
