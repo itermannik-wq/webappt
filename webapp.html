@@ -3426,6 +3426,24 @@
       }
     };
 
+    function parseApiError(err){
+      const msg = err?.message ? String(err.message) : String(err || "");
+      const match = msg.match(/^(\d+):\s*(.*)$/s);
+      if (!match) return { status: null, detail: msg };
+      const status = Number(match[1]);
+      let detail = match[2]?.trim() || "";
+      try{
+        const parsed = JSON.parse(detail);
+        if (parsed && typeof parsed.detail === "string"){
+          detail = parsed.detail;
+        }
+      }catch{
+        // ignore json parse errors
+      }
+      return { status, detail };
+    }
+
+
     /**********************
      * App state
      **********************/
@@ -7343,15 +7361,26 @@
       const cash = Number($("#donCash").value||0);
       const account = $("#donAccount").value || "main";
 
-      await API.post(`/api/months/${State.monthId}/services`, {
-        service_date: d,
-        cashless,
-        cash,
-        income_type: type,
-        account
-      });
-      setToast("Сохранено");
-      await refreshAll();
+      try{
+        await API.post(`/api/months/${State.monthId}/services`, {
+          service_date: d,
+          cashless,
+          cash,
+          income_type: type,
+          account
+        });
+        setToast("Сохранено");
+        await refreshAll();
+      }catch(err){
+        const info = parseApiError(err);
+        if (info.status === 409 && info.detail){
+          setToast(info.detail);
+          await refreshAll();
+          return;
+        }
+        alert(info.detail || "Не удалось сохранить пожертвование.");
+        return;
+      }
 
       if (andNext){
         if (isDonation) {

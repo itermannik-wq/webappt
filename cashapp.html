@@ -421,10 +421,12 @@
         const parts = data.participants || [];
         const meId = API.user?.telegram_id;
         const mePart = parts.find(p=> Number(p.telegram_id) === Number(meId));
-        const canAct = r.status === 'PENDING_SIGNERS' && mePart && !mePart.is_admin && (mePart.state === 'PENDING');
+        const isAdminParticipant = mePart && mePart.is_admin;
+        const canSignerAct = r.status === 'PENDING_SIGNERS' && mePart && !mePart.is_admin && (mePart.state === 'PENDING');
         const needsRetry = r.attempt === 2 && mePart && !mePart.is_admin && (mePart.state === 'REFUSED_NEEDS_RETRY');
+        const canAdminAct = isAdminParticipant && r.status === 'PENDING_ADMIN';
 
-        const actAllowed = canAct || needsRetry;
+        const actAllowed = canSignerAct || needsRetry || canAdminAct;
 
         const wrap = document.createElement('div');
         wrap.innerHTML = `
@@ -452,23 +454,24 @@
         }
 
         const action = document.createElement('div');
-        action.className='grid2';
+        action.className = isAdminParticipant ? '' : 'grid2';
 
         // sign block
         const signCard = document.createElement('div');
         signCard.className='item';
-        signCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Подписать</div>`;
+        signCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">${isAdminParticipant ? 'Подписать как админ' : 'Подписать'}</div>`;
         const pad = makeCanvasPad();
         signCard.appendChild(pad.wrap);
         const btnSign = document.createElement('button');
         btnSign.className='btn ok';
-        btnSign.textContent='Подтвердить подпись';
+        btnSign.textContent = isAdminParticipant ? 'Подтвердить подпись админа' : 'Подтвердить подпись';
         btnSign.style.marginTop='10px';
         signCard.appendChild(btnSign);
         btnSign.addEventListener('click', async ()=>{
           try{
             btnSign.disabled = true;
-            await API.post(`/api/cashflow/requests/${id}/sign`, {signature: pad.dataUrl()});
+            const signPath = isAdminParticipant ? 'admin-sign' : 'sign';
+            await API.post(`/api/cashflow/requests/${id}/${signPath}`, {signature: pad.dataUrl()});
             showOk('Подпись отправлена');
             await openDetail(id);
             await loadList();
@@ -476,34 +479,38 @@
           finally{ btnSign.disabled=false; }
         });
 
-        // refuse block
-        const refCard = document.createElement('div');
-        refCard.className='item';
-        refCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px; color: var(--danger);">Отказать</div>`;
-        const ta = document.createElement('textarea');
-        ta.rows = 5;
-        ta.placeholder = 'Укажите причину отказа…';
-        refCard.appendChild(ta);
-        const btnRef = document.createElement('button');
-        btnRef.className='btn danger';
-        btnRef.textContent='Отправить отказ';
-        btnRef.style.marginTop='10px';
-        refCard.appendChild(btnRef);
-        btnRef.addEventListener('click', async ()=>{
-          try{
-            const reason = (ta.value||'').trim();
-            if (!reason) { showErr(new Error('Причина отказа обязательна')); return; }
-            btnRef.disabled = true;
-            await API.post(`/api/cashflow/requests/${id}/refuse`, {reason});
-            showOk('Отказ отправлен');
-            await openDetail(id);
-            await loadList();
-          }catch(e){ showErr(e); }
-          finally{ btnRef.disabled=false; }
-        });
 
         action.appendChild(signCard);
-        action.appendChild(refCard);
+
+        if (!isAdminParticipant) {
+          // refuse block
+          const refCard = document.createElement('div');
+          refCard.className='item';
+          refCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px; color: var(--danger);">Отказать</div>`;
+          const ta = document.createElement('textarea');
+          ta.rows = 5;
+          ta.placeholder = 'Укажите причину отказа…';
+          refCard.appendChild(ta);
+          const btnRef = document.createElement('button');
+          btnRef.className='btn danger';
+          btnRef.textContent='Отправить отказ';
+          btnRef.style.marginTop='10px';
+          refCard.appendChild(btnRef);
+          btnRef.addEventListener('click', async ()=>{
+            try{
+              const reason = (ta.value||'').trim();
+              if (!reason) { showErr(new Error('Причина отказа обязательна')); return; }
+              btnRef.disabled = true;
+              await API.post(`/api/cashflow/requests/${id}/refuse`, {reason});
+              showOk('Отказ отправлен');
+              await openDetail(id);
+              await loadList();
+            }catch(e){ showErr(e); }
+            finally{ btnRef.disabled=false; }
+          });
+
+          action.appendChild(refCard);
+        }
         wrap.appendChild(action);
 
         UI.detail.innerHTML='';
