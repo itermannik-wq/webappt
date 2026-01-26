@@ -8114,6 +8114,10 @@
       }
 
       State.role = API.user?.role || "viewer";
+      if (State.role === "cash_signer"){
+        window.location.replace(`${API.baseUrl}/cashapp`);
+        return;
+      }
       const displayName = (API.user?.name || "").trim();
       $("#roleBadge").textContent = `роль: ${displayName || State.role}`;
       applyRoleUI();

@@ -130,6 +130,17 @@ def load_config() -> Config:
 
 CFG = load_config()
 
+def require_https_webapp_url(url: str) -> Optional[str]:
+    if not url:
+        return None
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return None
+    if parsed.scheme.lower() != "https":
+        return None
+    return url
+
 
 # ---------------------------
 # DB helpers (sqlite3)
@@ -2098,20 +2109,27 @@ def get_user_role_from_db(telegram_id: int) -> str:
 
 
 def main_menu_kb(role: str) -> InlineKeyboardMarkup:
+    if role == "cash_signer":
+        cashapp_url = f"{CFG.APP_URL.rstrip('/')}/cashapp"
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Наличные / Подписи", web_app=WebAppInfo(url=cashapp_url))],
+            ]
+        )
+
+    webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
     buttons = [
-        [InlineKeyboardButton(text="Открыть бухгалтерию (WebApp)", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
+        *(
+            [[InlineKeyboardButton(text="Открыть бухгалтерию (WebApp)", web_app=WebAppInfo(url=webapp_url))]]
+            if webapp_url
+            else []
+        ),
         [
             InlineKeyboardButton(text="Быстрый ввод пожертвования", callback_data="quick:donation"),
             InlineKeyboardButton(text="Быстрый ввод расхода", callback_data="quick:expense"),
         ],
         [InlineKeyboardButton(text="Отчёты", callback_data="menu:reports")],
     ]
-    if role == "cash_signer":
-        cashapp_url = f"{CFG.APP_URL.rstrip('/')}/cashapp"
-        buttons.insert(
-            0,
-            [InlineKeyboardButton(text="Наличные / Подписи", web_app=WebAppInfo(url=cashapp_url))],
-        )
     if role == "admin":
         buttons.append([InlineKeyboardButton(text="Настройки", callback_data="menu:settings")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -2129,17 +2147,24 @@ def confirm_kb(kind: str) -> InlineKeyboardMarkup:
 
 
 def reports_kb() -> InlineKeyboardMarkup:
+    webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Отчёт за текущее воскресенье", callback_data="report:sunday")],
             [InlineKeyboardButton(text="Расходы за текущий месяц", callback_data="report:month_expenses")],
             [InlineKeyboardButton(text="Итоги месяца", callback_data="report:month_summary")],
-            [InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
+            *(
+                [[InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=webapp_url))]]
+                if webapp_url
+                else []
+            ),
         ]
     )
 
-    def webapp_url_with_screen(screen: str) -> str:
-        url = CFG.WEBAPP_URL
+    def webapp_url_with_screen(screen: str) -> Optional[str]:
+        url = require_https_webapp_url(CFG.WEBAPP_URL)
+        if not url:
+            return None
         try:
             parsed = urllib.parse.urlparse(url)
             query = urllib.parse.parse_qs(parsed.query)
@@ -2150,14 +2175,14 @@ def reports_kb() -> InlineKeyboardMarkup:
             sep = "&" if "?" in url else "?"
             return f"{url}{sep}screen={screen}"
 
-    def parse_quick_input(text: str) -> Optional[Dict[str, Any]]:
-        """
-        Форматы из ТЗ:
-          "пож 8500 4800"   -> cashless=8500, cash=4800
-          "расход 2500 зал" -> unit_amount=2500, category="зал", title="зал"
-        """
-        t = text.strip()
-        low = t.lower()
+def parse_quick_input(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Форматы из ТЗ:
+      "пож 8500 4800"   -> cashless=8500, cash=4800
+      "расход 2500 зал" -> unit_amount=2500, category="зал", title="зал"
+    """
+    t = text.strip()
+    low = t.lower()
 
     if low.startswith("пож"):
         parts = t.split()
@@ -2296,6 +2321,13 @@ async def on_start(m: Message):
         "Меню бухгалтерии:",
         reply_markup=main_menu_kb(role),
     )
+    webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
+    cashapp_url = require_https_webapp_url(f"{CFG.APP_URL.rstrip('/')}/cashapp")
+    if not webapp_url or (role == "cash_signer" and not cashapp_url):
+        await m.answer(
+            "Внимание: WebApp-кнопки доступны только по HTTPS.\n"
+            "Настройте публичный HTTPS-домен и задайте APP_URL/WEBAPP_URL в .env."
+        )
 
 
 @router.message(F.text)
@@ -2400,14 +2432,16 @@ async def on_reports_menu(cq: CallbackQuery):
             await cq.answer("Нет доступа", show_alert=True)
             return
 
+        settings_url = webapp_url_with_screen("settings")
+        inline_keyboard = []
+        if settings_url:
+            inline_keyboard.append(
+                [InlineKeyboardButton(text="Открыть настройки (WebApp)",
+                                      web_app=WebAppInfo(url=settings_url))]
+            )
         await cq.message.answer(
             "Настройки:",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="Открыть настройки (WebApp)",
-                                          web_app=WebAppInfo(url=webapp_url_with_screen("settings")))]
-                ]
-            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_keyboard),
         )
         await cq.answer()
 
@@ -2446,8 +2480,12 @@ async def on_reports_menu(cq: CallbackQuery):
         m = get_or_create_month(today.year, today.month)
         summary = compute_month_summary(int(m["id"]), ensure_tithe=True)
         text = format_month_summary_text(summary)
+        webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
+        inline_keyboard = []
+        if webapp_url:
+            inline_keyboard.append([InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=webapp_url))])
         await cq.message.answer(text, reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=CFG.WEBAPP_URL))]]
+            inline_keyboard=inline_keyboard
         ))
         await cq.answer()
         return
@@ -2664,13 +2702,14 @@ def build_sunday_report_text(today: dt.date) -> Tuple[str, InlineKeyboardMarkup]
         f"• СДДР: <b>{sddr_text}</b>"
     )
 
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
-            [InlineKeyboardButton(text="Добавить расход", callback_data="quick:expense")],
-            [InlineKeyboardButton(text="История месяца", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
-        ]
-    )
+    webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
+    inline_keyboard = []
+    if webapp_url:
+        inline_keyboard.append([InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=webapp_url))])
+    inline_keyboard.append([InlineKeyboardButton(text="Добавить расход", callback_data="quick:expense")])
+    if webapp_url:
+        inline_keyboard.append([InlineKeyboardButton(text="История месяца", web_app=WebAppInfo(url=webapp_url))])
+    kb = InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
     return title + block1 + block2 + block3, kb
 
 
@@ -2723,12 +2762,12 @@ def build_month_expenses_report_text(today: dt.date) -> Tuple[str, InlineKeyboar
         f"• Факт. баланс: <b>{fmt_money(float(summary['fact_balance']))}</b>"
     )
 
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=CFG.WEBAPP_URL))],
-            [InlineKeyboardButton(text="Добавить расход", callback_data="quick:expense")],
-        ]
-    )
+    webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
+    inline_keyboard = []
+    if webapp_url:
+        inline_keyboard.append([InlineKeyboardButton(text="Открыть дашборд", web_app=WebAppInfo(url=webapp_url))])
+    inline_keyboard.append([InlineKeyboardButton(text="Добавить расход", callback_data="quick:expense")])
+    kb = InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
     return title + body, kb
 
 
@@ -3144,6 +3183,15 @@ def webapp():
     if not os.path.exists(path):
         return JSONResponse({"detail": "webapp.html not found"}, status_code=404)
     return FileResponse(path, media_type="text/html")
+
+
+@APP.get("/cashapp")
+def cashapp():
+    path = os.path.join(os.path.dirname(__file__), "cashapp.html")
+    if not os.path.exists(path):
+        return JSONResponse({"detail": "cashapp.html not found"}, status_code=404)
+    return FileResponse(path, media_type="text/html")
+
 
 
 # ---------------------------
