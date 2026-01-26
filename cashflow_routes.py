@@ -244,9 +244,6 @@ def sign_request(
     cfg = _cash_cfg()
     db_connect = _app_db_connect()
     with db_connect() as conn:
-        # admin должен подписывать через /admin-sign
-        if str(u["role"]) == "admin":
-            raise HTTPException(status_code=403, detail="Admin must use /admin-sign")
         try:
             m.record_signature(
                 conn,
@@ -385,38 +382,7 @@ def admin_sign(
     bg: BackgroundTasks,
     u=Depends(_app_require_role("admin")),
 ):
-    _ensure_cashflow_tables()
-    cfg = _cash_cfg()
-    db_connect = _app_db_connect()
-    with db_connect() as conn:
-        try:
-            m.record_signature(
-                conn,
-                cfg,
-                request_id=int(request_id),
-                telegram_id=int(u["telegram_id"]),
-                signature_data_url=body.signature,
-                as_admin=True,
-            )
-        except PermissionError as e:
-            raise HTTPException(status_code=403, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-        view = m.build_request_view(conn, int(request_id))
-        req = view["request"]
-
-    if req.get("created_by_telegram_id") and req.get("status") == "FINAL":
-        bg.add_task(
-            b.notify_initiator_final,
-            initiator_id=int(req["created_by_telegram_id"]),
-            request_id=int(request_id),
-            account=req["account"],
-            op_type=req["op_type"],
-            amount=float(req["amount"]),
-            status=str(req["status"]),
-        )
-    return {"ok": True, "item": view}
+    raise HTTPException(status_code=403, detail="Admin sign is disabled, use /sign")
 
 
 @router.post("/api/cashflow/requests/{request_id}/cancel")

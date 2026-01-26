@@ -6923,7 +6923,7 @@
         const signBlock = document.createElement("div");
         signBlock.className = "form";
         const pad = createSignaturePad();
-        signBlock.innerHTML = `<div class="divider"></div><div class="bold" style="margin-bottom:6px;">Подпись администратора</div>`;
+        signBlock.innerHTML = `<div class="divider"></div><div class="bold" style="margin-bottom:6px;">Подпись</div>`;
         signBlock.appendChild(pad.wrap);
         const btn = document.createElement("button");
         btn.className = "btn ok";
@@ -6931,7 +6931,7 @@
         btn.innerHTML = `<span class="icon">check_circle</span> Подписать`;
         btn.style.marginTop = "8px";
         btn.addEventListener("click", async ()=>{
-          await API.post(`/api/cashflow/requests/${r.id}/admin-sign`, { signature: pad.dataUrl() });
+          await API.post(`/api/cashflow/requests/${r.id}/sign`, { signature: pad.dataUrl() });
           await loadCashflowRequests();
           await openCashflowDetail(r.id);
         });

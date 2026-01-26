@@ -470,9 +470,6 @@ def record_signature(
     p = _ensure_participant(conn, request_id, telegram_id)
     if as_admin and int(p["is_admin"]) != 1:
         raise PermissionError("Not admin participant")
-    if (not as_admin) and int(p["is_admin"]) == 1:
-        # обычный эндпоинт sign не должен подписывать за админа
-        raise PermissionError("Admin must use admin-sign")
 
     attempt = int(r["attempt"])
     # если уже есть запись на этой попытке — запрещаем

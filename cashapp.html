@@ -421,7 +421,8 @@
         const parts = data.participants || [];
         const meId = API.user?.telegram_id ?? tg?.initDataUnsafe?.user?.id ?? API.user?.id;
         const mePart = parts.find(p=> String(p.telegram_id) === String(meId));
-        const isAdminParticipant = mePart && mePart.is_admin;
+        const isAdminUser = API.user?.role === 'admin';
+        const isAdminParticipant = Boolean(mePart && mePart.is_admin && isAdminUser);
         const isClosed = r.status === 'FINAL' || r.status === 'CANCELLED';
         const canSignerAct = !isClosed && mePart && !mePart.is_admin && (mePart.state === 'PENDING');
         const needsRetry = !isClosed && r.attempt === 2 && mePart && !mePart.is_admin && (mePart.state === 'REFUSED_NEEDS_RETRY');
@@ -460,19 +461,18 @@
         // sign block
         const signCard = document.createElement('div');
         signCard.className='item';
-        signCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">${isAdminParticipant ? 'Подписать как админ' : 'Подписать'}</div>`;
+        signCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Подписать</div>`;
         const pad = makeCanvasPad();
         signCard.appendChild(pad.wrap);
         const btnSign = document.createElement('button');
         btnSign.className='btn ok';
-        btnSign.textContent = isAdminParticipant ? 'Подтвердить подпись админа' : 'Подтвердить подпись';
+        btnSign.textContent = 'Подтвердить подпись';
         btnSign.style.marginTop='10px';
         signCard.appendChild(btnSign);
         btnSign.addEventListener('click', async ()=>{
           try{
             btnSign.disabled = true;
-            const signPath = isAdminParticipant ? 'admin-sign' : 'sign';
-            await API.post(`/api/cashflow/requests/${id}/${signPath}`, {signature: pad.dataUrl()});
+            await API.post(`/api/cashflow/requests/${id}/sign`, {signature: pad.dataUrl()});
             showOk('Подпись отправлена');
             await openDetail(id);
             await loadList();
