@@ -3577,9 +3577,13 @@ def create_service(
             created_by_telegram_id=int(u["telegram_id"]),
         )
         if request_id:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Cash collection requires signatures. Request #{request_id} created.",
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "requires_signatures": True,
+                    "request_id": request_id,
+                    "detail": f"Сбор наличных требует подписей. Создан запрос №{request_id}.",
+                },
             )
     before = db_fetchone(
         """

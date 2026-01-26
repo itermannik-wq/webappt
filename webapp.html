@@ -7362,13 +7362,18 @@
       const account = $("#donAccount").value || "main";
 
       try{
-        await API.post(`/api/months/${State.monthId}/services`, {
+        const res = await API.post(`/api/months/${State.monthId}/services`, {
           service_date: d,
           cashless,
           cash,
           income_type: type,
           account
         });
+        if (res?.requires_signatures){
+          setToast(res.detail || "Сбор наличных требует подписей.");
+          await refreshAll();
+          return;
+        }
         setToast("Сохранено");
         await refreshAll();
       }catch(err){
