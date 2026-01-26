@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Подтверждение наличных</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      :root{
+        --bg: #0b0e14;
+        --card: #121826;
+        --txt: #e8eefc;
+        --muted: #9aa4b2;
+        --accent: #6ea8fe;
+        --danger: #ff6b6b;
+        --ok: #51cf66;
+        --border: rgba(255,255,255,0.10);
+      }
+      html[data-theme="light"]{
+        --bg: #f6f7fb;
+        --card: #ffffff;
+        --txt: #0b1020;
+        --muted: #576072;
+        --accent: #2f6fed;
+        --danger: #d64545;
+        --ok: #2f9e44;
+        --border: rgba(10,16,32,0.12);
+      }
+      *{ box-sizing: border-box; }
+      body{
+        margin:0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+        background: var(--bg);
+        color: var(--txt);
+      }
+      .wrap{ max-width: 980px; margin: 0 auto; padding: 12px; }
+      .topbar{ display:flex; gap:10px; align-items:center; justify-content:space-between; padding: 6px 0 12px; }
+      .title{ font-weight: 800; font-size: 18px; }
+      .pill{ font-size: 12px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+      .tabs{ display:flex; gap:8px; flex-wrap:wrap; }
+      .tab{ border: 1px solid var(--border); background: transparent; color: var(--txt); padding: 8px 10px; border-radius: 12px; cursor:pointer; }
+      .tab.active{ background: var(--card); border-color: rgba(110,168,254,.5); }
+      .card{ background: var(--card); border:1px solid var(--border); border-radius: 16px; padding: 12px; }
+      .row{ display:flex; gap:12px; flex-wrap:wrap; }
+      .col{ flex: 1 1 320px; }
+      .muted{ color: var(--muted); }
+      .btn{ border: 1px solid var(--border); background: transparent; color: var(--txt); padding: 10px 12px; border-radius: 12px; cursor:pointer; }
+      .btn.primary{ background: rgba(110,168,254,.12); border-color: rgba(110,168,254,.55); }
+      .btn.danger{ background: rgba(255,107,107,.10); border-color: rgba(255,107,107,.55); }
+      .btn.ok{ background: rgba(81,207,102,.10); border-color: rgba(81,207,102,.55); }
+      .btn:disabled{ opacity: .55; cursor:not-allowed; }
+      .list{ display:flex; flex-direction:column; gap:10px; }
+      .item{ padding: 12px; border:1px solid var(--border); border-radius: 14px; background: rgba(0,0,0,0.03); }
+      html[data-theme="dark"] .item{ background: rgba(255,255,255,0.03); }
+      .item h4{ margin:0 0 6px; font-size: 15px; }
+      .item .meta{ font-size: 12px; color: var(--muted); display:flex; gap:10px; flex-wrap:wrap; }
+      .badge{ font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); }
+      .badge.ok{ border-color: rgba(81,207,102,.55); color: var(--ok); }
+      .badge.danger{ border-color: rgba(255,107,107,.55); color: var(--danger); }
+      .badge.wait{ border-color: rgba(110,168,254,.55); color: var(--accent); }
+      .divider{ height: 1px; background: var(--border); margin: 12px 0; }
+      .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+      @media (max-width: 720px){ .grid2{ grid-template-columns: 1fr; } }
+      .field{ display:flex; flex-direction:column; gap:6px; }
+      textarea, input, select{
+        width:100%; border-radius: 12px; border:1px solid var(--border);
+        padding: 10px; background: transparent; color: var(--txt);
+      }
+      canvas{ width:100%; height: 160px; border-radius: 12px; border:1px dashed var(--border); background: rgba(0,0,0,0.03); touch-action: none; }
+      html[data-theme="dark"] canvas{ background: rgba(255,255,255,0.03); }
+      table{ width:100%; border-collapse: collapse; }
+      th, td{ border-bottom: 1px solid var(--border); padding: 8px; font-size: 13px; text-align:left; vertical-align: top; }
+      th{ color: var(--muted); font-weight: 700; }
+      .err{ color: var(--danger); white-space: pre-wrap; }
+      .okmsg{ color: var(--ok); }
+      .link{ color: var(--accent); text-decoration: underline; cursor:pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="topbar">
+        <div>
+          <div class="title">Подтверждение наличных</div>
+          <div class="muted" id="subtitle">Загрузка…</div>
+        </div>
+        <div class="pill" id="mePill">—</div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:10px;">
+        <button class="tab active" id="tabRequests">Запросы</button>
+        <button class="tab" id="tabAct">Акт изъятия</button>
+      </div>
+
+      <div class="card" id="panelRequests">
+        <div class="row" style="align-items:end;">
+          <div class="col">
+            <div class="field">
+              <label class="muted">Счёт</label>
+              <select id="accountSel">
+                <option value="">Все</option>
+                <option value="main">Основной</option>
+                <option value="praise">Прославление</option>
+                <option value="alpha">Альфа курс</option>
+              </select>
+            </div>
+          </div>
+          <div class="col">
+            <div class="field">
+              <label class="muted">Фильтр</label>
+              <select id="openSel">
+                <option value="1">Только ожидающие</option>
+                <option value="0">Все</option>
+              </select>
+            </div>
+          </div>
+          <div style="min-width:140px;">
+            <button class="btn primary" id="btnReload">Обновить</button>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+        <div id="list" class="list"></div>
+
+        <div class="divider"></div>
+        <div id="detail" style="display:none;"></div>
+      </div>
+
+      <div class="card" id="panelAct" style="display:none;">
+        <div class="row" style="align-items:end;">
+          <div class="col">
+            <div class="field">
+              <label class="muted">Счёт</label>
+              <select id="actAccountSel">
+                <option value="">Все</option>
+                <option value="main">Основной</option>
+                <option value="praise">Прославление</option>
+                <option value="alpha">Альфа курс</option>
+              </select>
+            </div>
+          </div>
+          <div style="min-width:140px;">
+            <button class="btn primary" id="btnActReload">Обновить</button>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div id="actErr" class="err" style="display:none;"></div>
+        <div style="overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Сумма</th>
+                <th>ФИО</th>
+                <th>Тип</th>
+                <th>Подпись</th>
+              </tr>
+            </thead>
+            <tbody id="actBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+      <div id="msg" class="err" style="display:none;"></div>
+      <div id="ok" class="okmsg" style="display:none;"></div>
+    </div>
+
+    <script>
+      const tg = window.Telegram?.WebApp;
+
+      function detectTheme(){
+        try{
+          const bg = tg?.themeParams?.bg_color;
+          if (!bg) return null;
+          // простое правило: светлый если яркость высокая
+          const h = bg.replace('#','');
+          const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+          const y = (r*299 + g*587 + b*114)/1000;
+          return y > 155 ? 'light' : 'dark';
+        }catch{ return null; }
+      }
+
+      function applyTheme(){
+        const t = detectTheme();
+        document.documentElement.dataset.theme = t || 'dark';
+      }
+
+      applyTheme();
+      try{ tg?.ready(); tg?.expand(); }catch{}
+
+      const API = {
+        token: null,
+        user: null,
+        baseUrl: location.origin,
+        async auth(){
+          const initData = tg?.initData || "";
+          if (!initData) throw new Error("Нет initData. Откройте через Telegram.");
+          const res = await fetch(`${API.baseUrl}/api/auth/telegram`,{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({initData})
+          });
+          if (!res.ok) throw new Error(`Auth failed: ${res.status}`);
+          const data = await res.json();
+          API.token = data.token;
+          API.user = data.user;
+          localStorage.setItem('cashflowToken', API.token);
+          localStorage.setItem('cashflowUser', JSON.stringify(API.user));
+        },
+        async ensure(){
+          if (!API.token) {
+            API.token = localStorage.getItem('cashflowToken');
+            try{ API.user = JSON.parse(localStorage.getItem('cashflowUser')||'null'); }catch{}
+          }
+          if (!API.token) return API.auth();
+          try{ await API.get('/api/me'); }
+          catch{ return API.auth(); }
+        },
+        async req(path, opts={}){
+          const headers = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
+          if (API.token) headers.Authorization = `Bearer ${API.token}`;
+          const res = await fetch(`${API.baseUrl}${path}`, { ...opts, headers });
+          if (!res.ok) {
+            const t = await res.text().catch(()=>"");
+            throw new Error(`${res.status}: ${t||'Request failed'}`);
+          }
+          const ctype = (res.headers.get('content-type')||'');
+          if (ctype.includes('application/json')) return res.json();
+          return res.text();
+        },
+        get(path){ return API.req(path, {method:'GET'}); },
+        post(path, body){ return API.req(path, {method:'POST', body: JSON.stringify(body)}); }
+      };
+
+      const UI = {
+        msg: document.getElementById('msg'),
+        ok: document.getElementById('ok'),
+        subtitle: document.getElementById('subtitle'),
+        mePill: document.getElementById('mePill'),
+        list: document.getElementById('list'),
+        detail: document.getElementById('detail'),
+        tabRequests: document.getElementById('tabRequests'),
+        tabAct: document.getElementById('tabAct'),
+        panelRequests: document.getElementById('panelRequests'),
+        panelAct: document.getElementById('panelAct'),
+        accountSel: document.getElementById('accountSel'),
+        openSel: document.getElementById('openSel'),
+        btnReload: document.getElementById('btnReload'),
+        actAccountSel: document.getElementById('actAccountSel'),
+        btnActReload: document.getElementById('btnActReload'),
+        actBody: document.getElementById('actBody'),
+        actErr: document.getElementById('actErr'),
+      };
+
+      function showErr(e){
+        UI.ok.style.display='none';
+        UI.msg.style.display='block';
+        UI.msg.textContent = (e && e.message) ? e.message : String(e||'Ошибка');
+      }
+      function showOk(t){
+        UI.msg.style.display='none';
+        UI.ok.style.display='block';
+        UI.ok.textContent = t;
+        setTimeout(()=>{ UI.ok.style.display='none'; }, 2500);
+      }
+
+      function fmtAccount(a){
+        return {main:'Основной', praise:'Прославление', alpha:'Альфа курс'}[a] || a;
+      }
+      function fmtOp(t){
+        return {collect:'Сбор', withdraw:'Изъятие'}[t] || t;
+      }
+      function fmtStatus(s){
+        return {
+          PENDING_SIGNERS:'Ожидает подписантов',
+          PENDING_ADMIN:'Ожидает админа',
+          FINAL:'Завершено',
+          CANCELLED:'Отменено'
+        }[s] || s;
+      }
+
+      function badgeForStatus(s){
+        if (s==='FINAL') return `<span class="badge ok">${fmtStatus(s)}</span>`;
+        if (s==='CANCELLED') return `<span class="badge danger">${fmtStatus(s)}</span>`;
+        return `<span class="badge wait">${fmtStatus(s)}</span>`;
+      }
+
+      function qs(name){ return new URLSearchParams(location.search).get(name); }
+
+      // -------- Signature Canvas
+      function makeCanvasPad(){
+        const wrap = document.createElement('div');
+        const canvas = document.createElement('canvas');
+        const btnRow = document.createElement('div');
+        btnRow.style.display='flex';
+        btnRow.style.gap='10px';
+        btnRow.style.marginTop='10px';
+        const btnClear = document.createElement('button');
+        btnClear.className='btn';
+        btnClear.textContent='Очистить';
+        btnRow.appendChild(btnClear);
+        wrap.appendChild(canvas);
+        wrap.appendChild(btnRow);
+
+        // hi-dpi setup
+        function resize(){
+          const rect = canvas.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+          canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+          const ctx = canvas.getContext('2d');
+          ctx.scale(dpr, dpr);
+          ctx.lineWidth = 2.2;
+          ctx.lineCap = 'round';
+          ctx.strokeStyle = '#111';
+          // theme
+          if (document.documentElement.dataset.theme === 'dark') ctx.strokeStyle = '#e8eefc';
+        }
+
+        let drawing = false;
+        let last = null;
+        function pos(e){
+          const rect = canvas.getBoundingClientRect();
+          const x = (e.clientX - rect.left);
+          const y = (e.clientY - rect.top);
+          return {x,y};
+        }
+        function start(e){ drawing=true; last = pos(e); }
+        function move(e){
+          if (!drawing) return;
+          const p = pos(e);
+          const ctx = canvas.getContext('2d');
+          ctx.beginPath();
+          ctx.moveTo(last.x, last.y);
+          ctx.lineTo(p.x, p.y);
+          ctx.stroke();
+          last = p;
+        }
+        function end(){ drawing=false; last=null; }
+
+        canvas.addEventListener('pointerdown', (e)=>{ canvas.setPointerCapture(e.pointerId); start(e); });
+        canvas.addEventListener('pointermove', move);
+        canvas.addEventListener('pointerup', end);
+        canvas.addEventListener('pointercancel', end);
+        btnClear.addEventListener('click', ()=>{
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+        });
+        window.addEventListener('resize', resize);
+        setTimeout(resize, 0);
+
+        function dataUrl(){
+          // берём отрендеренный canvas
+          return canvas.toDataURL('image/png');
+        }
+        return {wrap, dataUrl};
+      }
+
+      // -------- Screens
+      async function loadList(){
+        UI.detail.style.display='none';
+        UI.detail.innerHTML='';
+        UI.list.innerHTML = '<div class="muted">Загрузка…</div>';
+        const account = UI.accountSel.value || '';
+        const onlyOpen = UI.openSel.value === '1';
+        const q = new URLSearchParams();
+        if (account) q.set('account', account);
+        q.set('only_open', onlyOpen ? 'true' : 'false');
+        const data = await API.get(`/api/cashflow/requests/my?${q.toString()}`);
+        const items = data.items || [];
+        if (!items.length){
+          UI.list.innerHTML = '<div class="muted">Нет запросов.</div>';
+          return;
+        }
+        UI.list.innerHTML = '';
+        for (const it of items){
+          const el = document.createElement('div');
+          el.className = 'item';
+          el.innerHTML = `
+            <h4>${fmtOp(it.op_type)} • ${fmtAccount(it.account)} • ${Number(it.amount).toFixed(2)}</h4>
+            <div class="meta">
+              ${badgeForStatus(it.status)}
+              <span>${it.created_at || ''}</span>
+              <span class="link" data-open="${it.id}">Открыть</span>
+            </div>
+          `;
+          el.querySelector('[data-open]')?.addEventListener('click', ()=> openDetail(it.id));
+          UI.list.appendChild(el);
+        }
+      }
+
+      function renderParticipants(parts){
+        const rows = parts.map(p=>{
+          const st = p.state;
+          let badge = '<span class="badge wait">Ожидает</span>';
+          if (st==='SIGNED') badge = '<span class="badge ok">Подписано</span>';
+          if (st==='REFUSED_NEEDS_RETRY') badge = '<span class="badge danger">Отказ (нужно повторно)</span>';
+          if (st==='REFUSED_FINAL') badge = '<span class="badge danger">ОТКАЗ</span>';
+          return `
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
+              <div>
+                <div style="font-weight:700;">${p.name}${p.is_admin ? ' (админ)' : ''}</div>
+                <div class="muted" style="font-size:12px;">${p.role}${p.detail ? ' • ' + p.detail : ''}</div>
+              </div>
+              <div>${badge}</div>
+            </div>
+          `;
+        }).join('');
+        return `<div>${rows}</div>`;
+      }
+
+      async function openDetail(id){
+        UI.detail.style.display='block';
+        UI.detail.innerHTML = '<div class="muted">Загрузка…</div>';
+        const data = await API.get(`/api/cashflow/requests/${id}`);
+        const r = data.request;
+        const parts = data.participants || [];
+        const meId = API.user?.telegram_id;
+        const mePart = parts.find(p=> Number(p.telegram_id) === Number(meId));
+        const canAct = r.status === 'PENDING_SIGNERS' && mePart && !mePart.is_admin && (mePart.state === 'PENDING');
+        const needsRetry = r.attempt === 2 && mePart && !mePart.is_admin && (mePart.state === 'REFUSED_NEEDS_RETRY');
+
+        const actAllowed = canAct || needsRetry;
+
+        const wrap = document.createElement('div');
+        wrap.innerHTML = `
+          <div class="item" style="background:transparent;">
+            <div class="meta" style="margin-bottom:8px;">${badgeForStatus(r.status)} <span>ID: ${r.id}</span></div>
+            <h4>${fmtOp(r.op_type)} • ${fmtAccount(r.account)} • ${Number(r.amount).toFixed(2)}</h4>
+            ${r.admin_comment ? `<div class="muted" style="margin-top:6px;">Комментарий админа: <i>${r.admin_comment}</i></div>` : ''}
+          </div>
+          <div class="divider"></div>
+          <div>
+            <div class="muted" style="margin-bottom:8px;">Участники</div>
+            ${renderParticipants(parts)}
+          </div>
+          <div class="divider"></div>
+        `;
+
+        if (!actAllowed){
+          const note = document.createElement('div');
+          note.className='muted';
+          note.textContent = 'Действие недоступно (уже выполнено или запрос не ожидает подпись).';
+          wrap.appendChild(note);
+          UI.detail.innerHTML='';
+          UI.detail.appendChild(wrap);
+          return;
+        }
+
+        const action = document.createElement('div');
+        action.className='grid2';
+
+        // sign block
+        const signCard = document.createElement('div');
+        signCard.className='item';
+        signCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Подписать</div>`;
+        const pad = makeCanvasPad();
+        signCard.appendChild(pad.wrap);
+        const btnSign = document.createElement('button');
+        btnSign.className='btn ok';
+        btnSign.textContent='Подтвердить подпись';
+        btnSign.style.marginTop='10px';
+        signCard.appendChild(btnSign);
+        btnSign.addEventListener('click', async ()=>{
+          try{
+            btnSign.disabled = true;
+            await API.post(`/api/cashflow/requests/${id}/sign`, {signature: pad.dataUrl()});
+            showOk('Подпись отправлена');
+            await openDetail(id);
+            await loadList();
+          }catch(e){ showErr(e); }
+          finally{ btnSign.disabled=false; }
+        });
+
+        // refuse block
+        const refCard = document.createElement('div');
+        refCard.className='item';
+        refCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px; color: var(--danger);">Отказать</div>`;
+        const ta = document.createElement('textarea');
+        ta.rows = 5;
+        ta.placeholder = 'Укажите причину отказа…';
+        refCard.appendChild(ta);
+        const btnRef = document.createElement('button');
+        btnRef.className='btn danger';
+        btnRef.textContent='Отправить отказ';
+        btnRef.style.marginTop='10px';
+        refCard.appendChild(btnRef);
+        btnRef.addEventListener('click', async ()=>{
+          try{
+            const reason = (ta.value||'').trim();
+            if (!reason) { showErr(new Error('Причина отказа обязательна')); return; }
+            btnRef.disabled = true;
+            await API.post(`/api/cashflow/requests/${id}/refuse`, {reason});
+            showOk('Отказ отправлен');
+            await openDetail(id);
+            await loadList();
+          }catch(e){ showErr(e); }
+          finally{ btnRef.disabled=false; }
+        });
+
+        action.appendChild(signCard);
+        action.appendChild(refCard);
+        wrap.appendChild(action);
+
+        UI.detail.innerHTML='';
+        UI.detail.appendChild(wrap);
+      }
+
+      async function loadAct(){
+        UI.actErr.style.display='none';
+        UI.actBody.innerHTML = '<tr><td colspan="5" class="muted">Загрузка…</td></tr>';
+        const account = UI.actAccountSel.value || '';
+        const q = new URLSearchParams();
+        if (account) q.set('account', account);
+        try{
+          const data = await API.get(`/api/cashflow/withdraw-act?${q.toString()}`);
+          const items = data.items || [];
+          if (!items.length){
+            UI.actBody.innerHTML = '<tr><td colspan="5" class="muted">Нет данных.</td></tr>';
+            return;
+          }
+          UI.actBody.innerHTML = '';
+          for (const r of items){
+            const sig = (r.signature_value || '').startsWith('ОТКАЗ') ? r.signature_value : (r.signature_path ? 'Подпись' : r.signature_value || '');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${r.date||''}</td>
+              <td>${Number(r.amount||0).toFixed(2)}</td>
+              <td>${r.fio||''}</td>
+              <td>${r.user_type||''}</td>
+              <td>${sig}</td>
+            `;
+            UI.actBody.appendChild(tr);
+          }
+        }catch(e){
+          UI.actErr.style.display='block';
+          UI.actErr.textContent = e.message || String(e);
+          UI.actBody.innerHTML = '<tr><td colspan="5" class="muted">Недоступно.</td></tr>';
+        }
+      }
+
+      // -------- Tabs
+      function setTab(which){
+        const req = which === 'requests';
+        UI.tabRequests.classList.toggle('active', req);
+        UI.tabAct.classList.toggle('active', !req);
+        UI.panelRequests.style.display = req ? 'block' : 'none';
+        UI.panelAct.style.display = req ? 'none' : 'block';
+      }
+
+      UI.tabRequests.addEventListener('click', ()=>{ setTab('requests'); });
+      UI.tabAct.addEventListener('click', async ()=>{ setTab('act'); await loadAct(); });
+      UI.btnReload.addEventListener('click', ()=> loadList().catch(showErr));
+      UI.btnActReload.addEventListener('click', ()=> loadAct().catch(showErr));
+
+      // -------- Boot
+      (async ()=>{
+        try{
+          await API.ensure();
+          UI.subtitle.textContent = 'Готово';
+          UI.mePill.textContent = `${API.user?.name || ''} • ${API.user?.role || ''}`;
+          const rid = qs('rid');
+          await loadList();
+          if (rid) await openDetail(rid);
+        }catch(e){
+          UI.subtitle.textContent = 'Ошибка';
+          showErr(e);
+        }
+      })();
+    </script>
+  </body>
+</html>
