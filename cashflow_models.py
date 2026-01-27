@@ -338,7 +338,7 @@ def list_my_cash_requests(
     where: List[str] = ["p.telegram_id=?"]
     params: List[Any] = [int(telegram_id)]
     if account:
-        where.append("r.account=?")
+        where.append("LOWER(r.account)=?")
         params.append(_normalize_account(account))
     if only_open:
         where.append("r.status IN ('PENDING_SIGNERS','PENDING_ADMIN')")
