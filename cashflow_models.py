@@ -252,7 +252,7 @@ def create_cash_request(
           created_by_telegram_id, admin_telegram_id,
           source_kind, source_id, source_payload,
           created_at, updated_at
-        ) VALUES (?, ?, ?, 'PENDING_SIGNERS', 1, ?, ?, ?, ?, ?, ?);
+        ) VALUES (?, ?, ?, 'PENDING_SIGNERS', 1, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             account_n,
