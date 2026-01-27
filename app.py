@@ -1145,6 +1145,8 @@ def finalize_cashflow_collect_request(request_id: int) -> Optional[int]:
     req = db_fetchone("SELECT * FROM cash_requests WHERE id=?;", (int(request_id),))
     if not req:
         return None
+    if hasattr(req, "keys"):
+        req = dict(req)
     if str(req["status"]) != "FINAL" or str(req["op_type"]) != "collect":
         return None
     if str(req.get("source_kind") or "") != "service":
