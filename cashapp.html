@@ -7,86 +7,183 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
       :root{
-        --bg: #0b0e14;
-        --card: #121826;
-        --txt: #e8eefc;
-        --muted: #9aa4b2;
-        --accent: #6ea8fe;
-        --danger: #ff6b6b;
-        --ok: #51cf66;
-        --border: rgba(255,255,255,0.10);
+        --bg: #0b0f14;
+        --card: rgba(255,255,255,.06);
+        --card2: rgba(255,255,255,.08);
+        --text: rgba(255,255,255,.92);
+        --muted: rgba(255,255,255,.65);
+        --muted2: rgba(255,255,255,.45);
+        --stroke: rgba(255,255,255,.10);
+        --shadow: 0 10px 30px rgba(0,0,0,.30);
+
+        --accent: #10b981;
+        --accent2: #34d399;
+        --danger: #ef4444;
+        --warn: #f59e0b;
+
+        --r-card: 18px;
+        --r-btn: 16px;
+        --gap: 16px;
+        --gap8: 8px;
+        --safe-top: env(safe-area-inset-top);
+        --safe-bot: env(safe-area-inset-bottom);
+
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif;
       }
       html[data-theme="light"]{
-        --bg: #f6f7fb;
+        --bg: #f4f6fa;
         --card: #ffffff;
-        --txt: #0b1020;
-        --muted: #576072;
-        --accent: #2f6fed;
-        --danger: #d64545;
-        --ok: #2f9e44;
-        --border: rgba(10,16,32,0.12);
+        --card2: #eef2f7;
+        --text: #111827;
+        --muted: #4b5563;
+        --muted2: #6b7280;
+        --stroke: rgba(15,23,42,.12);
+        --shadow: 0 10px 24px rgba(15,23,42,.10);
       }
       *{ box-sizing: border-box; }
       body{
         margin:0;
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+        font-family: var(--font);
         background: var(--bg);
-        color: var(--txt);
+        color: var(--text);
       }
-      .wrap{ max-width: 980px; margin: 0 auto; padding: 12px; }
-      .topbar{ display:flex; gap:10px; align-items:center; justify-content:space-between; padding: 6px 0 12px; }
-      .title{ font-weight: 800; font-size: 18px; }
-      .pill{ font-size: 12px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
-      .tabs{ display:flex; gap:8px; flex-wrap:wrap; }
-      .tab{ border: 1px solid var(--border); background: transparent; color: var(--txt); padding: 8px 10px; border-radius: 12px; cursor:pointer; }
-      .tab.active{ background: var(--card); border-color: rgba(110,168,254,.5); }
-      .card{ background: var(--card); border:1px solid var(--border); border-radius: 16px; padding: 12px; }
+      .app{
+        max-width: 520px;
+        margin: 0 auto;
+        padding: calc(var(--safe-top) + 12px) 14px calc(var(--safe-bot) + 18px);
+      }
+      .topbar{
+        display:flex;
+        gap:10px;
+        align-items:center;
+        justify-content:space-between;
+        margin-bottom: 12px;
+      }
+      .title{ font-weight: 700; font-size: 18px; letter-spacing:.2px; }
+      .subtitle{ color: var(--muted); font-size: 13px; }
+      .pill{
+        font-size: 12px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--stroke);
+        background: var(--card);
+        color: var(--muted);
+      }
+      .tabs{
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+        margin-bottom: 12px;
+      }
+      .tab{
+        border: 1px solid var(--stroke);
+        background: transparent;
+        color: var(--text);
+        padding: 8px 12px;
+        border-radius: 999px;
+        cursor:pointer;
+      }
+      .tab.active{
+        background: var(--card2);
+        border-color: rgba(16,185,129,.45);
+        color: var(--text);
+      }
+      .card{
+        background: var(--card);
+        border:1px solid var(--stroke);
+        border-radius: var(--r-card);
+        padding: 14px;
+        box-shadow: var(--shadow);
+      }
       .row{ display:flex; gap:12px; flex-wrap:wrap; }
-      .col{ flex: 1 1 320px; }
+      .col{ flex: 1 1 220px; }
       .muted{ color: var(--muted); }
-      .btn{ border: 1px solid var(--border); background: transparent; color: var(--txt); padding: 10px 12px; border-radius: 12px; cursor:pointer; }
-      .btn.primary{ background: rgba(110,168,254,.12); border-color: rgba(110,168,254,.55); }
-      .btn.danger{ background: rgba(255,107,107,.10); border-color: rgba(255,107,107,.55); }
-      .btn.ok{ background: rgba(81,207,102,.10); border-color: rgba(81,207,102,.55); }
+      .btn{
+        border: 1px solid var(--stroke);
+        background: transparent;
+        color: var(--text);
+        padding: 10px 12px;
+        border-radius: var(--r-btn);
+        cursor:pointer;
+        transition: transform .12s ease, background .12s ease;
+      }
+      .btn:active{ transform: scale(.98); }
+      .btn.primary{
+        background: rgba(16,185,129,.18);
+        border-color: rgba(16,185,129,.55);
+      }
+      .btn.danger{
+        background: rgba(239,68,68,.14);
+        border-color: rgba(239,68,68,.55);
+      }
+      .btn.ok{
+        background: rgba(16,185,129,.20);
+        border-color: rgba(16,185,129,.55);
+      }
       .btn:disabled{ opacity: .55; cursor:not-allowed; }
-      .list{ display:flex; flex-direction:column; gap:10px; }
-      .item{ padding: 12px; border:1px solid var(--border); border-radius: 14px; background: rgba(0,0,0,0.03); }
-      html[data-theme="dark"] .item{ background: rgba(255,255,255,0.03); }
+      .list{ display:flex; flex-direction:column; gap:12px; }
+      .item{
+        padding: 12px;
+        border:1px solid var(--stroke);
+        border-radius: 16px;
+        background: var(--card2);
+      }
       .item h4{ margin:0 0 6px; font-size: 15px; }
       .item .meta{ font-size: 12px; color: var(--muted); display:flex; gap:10px; flex-wrap:wrap; }
-      .badge{ font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); }
-      .badge.ok{ border-color: rgba(81,207,102,.55); color: var(--ok); }
-      .badge.danger{ border-color: rgba(255,107,107,.55); color: var(--danger); }
-      .badge.wait{ border-color: rgba(110,168,254,.55); color: var(--accent); }
-      .divider{ height: 1px; background: var(--border); margin: 12px 0; }
-      .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+      .badge{
+        font-size: 12px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--stroke);
+      }
+      .badge.ok{ border-color: rgba(16,185,129,.55); color: var(--accent2); }
+      .badge.danger{ border-color: rgba(239,68,68,.55); color: var(--danger); }
+      .badge.wait{ border-color: rgba(16,185,129,.55); color: var(--accent); }
+      .divider{ height: 1px; background: var(--stroke); margin: 12px 0; }
+      .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
       @media (max-width: 720px){ .grid2{ grid-template-columns: 1fr; } }
       .field{ display:flex; flex-direction:column; gap:6px; }
       textarea, input, select{
-        width:100%; border-radius: 12px; border:1px solid var(--border);
-        padding: 10px; background: transparent; color: var(--txt);
+        width:100%;
+        border-radius: 12px;
+        border:1px solid var(--stroke);
+        padding: 10px;
+        background: transparent;
+        color: var(--text);
       }
-      canvas{ width:100%; height: 160px; border-radius: 12px; border:1px dashed var(--border); background: rgba(0,0,0,0.03); touch-action: none; }
-      html[data-theme="dark"] canvas{ background: rgba(255,255,255,0.03); }
+      canvas{
+        width:100%;
+        height: 160px;
+        border-radius: 12px;
+        border:1px dashed var(--stroke);
+        background: var(--card2);
+        touch-action: none;
+      }
       table{ width:100%; border-collapse: collapse; }
-      th, td{ border-bottom: 1px solid var(--border); padding: 8px; font-size: 13px; text-align:left; vertical-align: top; }
+      th, td{
+        border-bottom: 1px solid var(--stroke);
+        padding: 8px;
+        font-size: 13px;
+        text-align:left;
+        vertical-align: top;
+      }
       th{ color: var(--muted); font-weight: 700; }
       .err{ color: var(--danger); white-space: pre-wrap; }
-      .okmsg{ color: var(--ok); }
-      .link{ color: var(--accent); text-decoration: underline; cursor:pointer; }
+      .okmsg{ color: var(--accent2); }
+      .link{ color: var(--accent2); text-decoration: underline; cursor:pointer; }
     </style>
   </head>
   <body>
-    <div class="wrap">
+    <div class="app">
       <div class="topbar">
         <div>
           <div class="title">Подтверждение наличных</div>
-          <div class="muted" id="subtitle">Загрузка…</div>
+          <div class="subtitle" id="subtitle">Загрузка…</div>
         </div>
         <div class="pill" id="mePill">—</div>
       </div>
 
-      <div class="tabs" style="margin-bottom:10px;">
+      <div class="tabs">
         <button class="tab active" id="tabRequests">Запросы</button>
         <button class="tab" id="tabAct">Акт изъятия</button>
       </div>

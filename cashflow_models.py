@@ -192,27 +192,18 @@ def pick_primary_admin(allow: Dict[int, Dict[str, Any]]) -> int:
 
 
 def pick_cash_signers(allow: Dict[int, Dict[str, Any]], account: str, op_type: str) -> List[int]:
-    """Возвращает список telegram_id подписантов по rules cash_scopes/cash_ops."""
-    account = _normalize_account(account)
-    op_type = _normalize_op_type(op_type)
+    """Возвращает список telegram_id подписантов.
+
+    Для подписей наличных по суммам не ограничиваем по cash_scopes/cash_ops,
+    чтобы активные подписанты всегда могли подписывать заявки.
+    """
+    _normalize_account(account)
+    _normalize_op_type(op_type)
     out: List[int] = []
     for tid, u in allow.items():
         if not _is_active(u):
             continue
         if str(u.get("role")) != "cash_signer":
-            continue
-        scopes = u.get("cash_scopes") or u.get("cash_accounts") or []
-        ops = u.get("cash_ops") or []
-        # допускаем строковый формат
-        if isinstance(scopes, str):
-            scopes = [s.strip() for s in scopes.split(",") if s.strip()]
-        if isinstance(ops, str):
-            ops = [s.strip() for s in ops.split(",") if s.strip()]
-        scopes_norm = [str(s).strip().lower() for s in (scopes or [])]
-        ops_norm = [str(s).strip().lower() for s in (ops or [])]
-        if account not in scopes_norm:
-            continue
-        if op_type not in ops_norm:
             continue
         out.append(int(tid))
     return sorted(set(out))
