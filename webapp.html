@@ -1565,6 +1565,41 @@
       color: rgba(16,185,129,.95);
     }
 
+    .cashflowActTable{
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      min-width: 520px;
+      font-size: 13px;
+    }
+    .cashflowActTable th,
+    .cashflowActTable td{
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--stroke);
+      text-align: left;
+      vertical-align: top;
+    }
+    .cashflowActTable th{
+      color: var(--muted);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .cashflowActTable td{
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .cashflowActTable td:nth-child(3),
+    .cashflowActTable td:nth-child(4),
+    .cashflowActTable td:nth-child(5){
+      white-space: normal;
+      word-break: break-word;
+    }
+    .cashflowActTable th:nth-child(2),
+    .cashflowActTable td:nth-child(2){
+      text-align: right;
+    }
+
+
     .chips{
       display:flex;
       flex-wrap: wrap;
@@ -2789,7 +2824,14 @@
                           <div class="grid2">
                             <div class="field">
                               <label>Счёт</label>
-                              <select id="cashflowCreateAccount" class="input">
+                              <div id="cashflowCreateAccountDropdown" class="dropdown">
+                                <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                                  <span class="dropdownValue">—</span>
+                                  <span class="icon">expand_more</span>
+                                </button>
+                                <div class="dropdownPanel" role="listbox"></div>
+                              </div>
+                              <select id="cashflowCreateAccount" class="input hiddenSelect" tabindex="-1" aria-hidden="true">
                                 <option value="main">MAIN • Основной</option>
                                 <option value="praise">PRAISE • Прославление</option>
                                 <option value="alpha">ALPHA • Альфа курс</option>
@@ -2823,7 +2865,14 @@
                       <div class="grid2">
                         <div class="field">
                           <label>Счёт</label>
-                          <select id="cashflowFilterAccount" class="input">
+                          <div id="cashflowFilterAccountDropdown" class="dropdown">
+                            <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                              <span class="dropdownValue">—</span>
+                              <span class="icon">expand_more</span>
+                            </button>
+                            <div class="dropdownPanel" role="listbox"></div>
+                          </div>
+                          <select id="cashflowFilterAccount" class="input hiddenSelect" tabindex="-1" aria-hidden="true">
                             <option value="">Все</option>
                             <option value="main">MAIN • Основной</option>
                             <option value="praise">PRAISE • Прославление</option>
@@ -2832,7 +2881,14 @@
                         </div>
                         <div class="field">
                           <label>Статус</label>
-                          <select id="cashflowFilterStatus" class="input">
+                          <div id="cashflowFilterStatusDropdown" class="dropdown">
+                            <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                              <span class="dropdownValue">—</span>
+                              <span class="icon">expand_more</span>
+                            </button>
+                            <div class="dropdownPanel" role="listbox"></div>
+                          </div>
+                          <select id="cashflowFilterStatus" class="input hiddenSelect" tabindex="-1" aria-hidden="true">
                             <option value="PENDING_SIGNERS">Ожидают подписантов</option>
                             <option value="PENDING_ADMIN">Ожидают админа</option>
                             <option value="FINAL">История (FINAL)</option>
@@ -2855,7 +2911,14 @@
                       <div class="grid2">
                         <div class="field">
                           <label>Счёт</label>
-                          <select id="cashflowActAccount" class="input">
+                          <div id="cashflowActAccountDropdown" class="dropdown">
+                            <button type="button" class="dropdownTrigger" aria-haspopup="listbox" aria-expanded="false">
+                              <span class="dropdownValue">—</span>
+                              <span class="icon">expand_more</span>
+                            </button>
+                            <div class="dropdownPanel" role="listbox"></div>
+                          </div>
+                          <select id="cashflowActAccount" class="input hiddenSelect" tabindex="-1" aria-hidden="true">
                             <option value="main">MAIN • Основной</option>
                             <option value="praise">PRAISE • Прославление</option>
                             <option value="alpha">ALPHA • Альфа курс</option>
@@ -2875,7 +2938,7 @@
                       </div>
                       <div class="spacer12"></div>
                       <div style="overflow:auto;">
-                        <table>
+                        <table class="cashflowActTable">
                           <thead>
                             <tr>
                               <th>Дата</th>
@@ -6973,12 +7036,15 @@
         const sig = (r.signature_value || "").startsWith("ОТКАЗ")
           ? r.signature_value
           : (r.signature_path ? "Подпись" : (r.signature_value || ""));
+        const date = r.date || r.created_at || "";
+        const fio = r.fio || r.name_snapshot || "";
+        const userType = r.user_type || r.role_snapshot || "";
         const tr = document.createElement("tr");
         tr.innerHTML = `
-          <td>${escapeHtml(r.date || "")}</td>
+          <td>${escapeHtml(date)}</td>
           <td>${Number(r.amount || 0).toFixed(2)}</td>
-          <td>${escapeHtml(r.fio || "")}</td>
-          <td>${escapeHtml(r.user_type || "")}</td>
+          <td>${escapeHtml(fio)}</td>
+          <td>${escapeHtml(userType)}</td>
           <td>${escapeHtml(sig)}</td>
         `;
         body.appendChild(tr);
@@ -8136,6 +8202,10 @@
       initDropdownFromSelect("histCategorySelect", "histCategoryDropdown");
       initDropdownFromSelect("periodYearSelect", "periodYearDropdown");
       initDropdownFromSelect("periodMonthSelect", "periodMonthDropdown");
+      initDropdownFromSelect("cashflowCreateAccount", "cashflowCreateAccountDropdown");
+      initDropdownFromSelect("cashflowFilterAccount", "cashflowFilterAccountDropdown");
+      initDropdownFromSelect("cashflowFilterStatus", "cashflowFilterStatusDropdown");
+      initDropdownFromSelect("cashflowActAccount", "cashflowActAccountDropdown");
       setDonationTypeUI();
 
 
