@@ -61,6 +61,10 @@ def _app_require_role(*roles: str):
 
     return _dep
 
+def _app_finalize_cashflow_collect_request():
+    from app import finalize_cashflow_collect_request  # lazy
+    return finalize_cashflow_collect_request
+
 
 def _get_cfg_paths() -> Dict[str, Any]:
     from app import CFG  # lazy
@@ -262,6 +266,11 @@ def sign_request(
         req = view["request"]
         # найдём имя подписанта
         signer_name = str(u["name"])
+
+    if req.get("status") == "FINAL":
+        finalize = _app_finalize_cashflow_collect_request()
+        finalize(int(request_id))
+
 
     # уведомить ответственного админа
     bg.add_task(

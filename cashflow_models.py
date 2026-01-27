@@ -76,6 +76,10 @@ def db_connect(cfg: CashflowConfig) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
 
+def _table_has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table});").fetchall()
+    return any(str(r[1]) == column for r in rows)
+
 
 def iso_now() -> str:
     # В проекте уже есть TZ-логика, но для модуля достаточно ISO UTC.
@@ -98,6 +102,7 @@ def init_cashflow_db(conn: sqlite3.Connection) -> None:
             admin_comment TEXT NULL,
             source_kind TEXT NULL,
             source_id INTEGER NULL,
+            source_payload TEXT NULL,            
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -136,6 +141,9 @@ def init_cashflow_db(conn: sqlite3.Connection) -> None:
             ON cash_signatures(request_id);
         """
     )
+    if not _table_has_column(conn, "cash_requests", "source_payload"):
+        conn.execute("ALTER TABLE cash_requests ADD COLUMN source_payload TEXT NULL;")
+        conn.commit()
     conn.commit()
 
 
@@ -219,6 +227,7 @@ def create_cash_request(
     created_by_telegram_id: Optional[int],
     source_kind: Optional[str] = None,
     source_id: Optional[int] = None,
+    source_payload: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Создаёт запрос на подпись + фиксирует состав участников."""
     account_n = _normalize_account(account)
@@ -233,12 +242,15 @@ def create_cash_request(
     participants = list(dict.fromkeys(signers + [admin_tid]))
 
     now = iso_now()
+    payload_json = None
+    if source_payload is not None:
+        payload_json = json.dumps(source_payload, ensure_ascii=False, sort_keys=True)
     cur = conn.execute(
         """
         INSERT INTO cash_requests (
           account, op_type, amount, status, attempt,
           created_by_telegram_id, admin_telegram_id,
-          source_kind, source_id,
+          source_kind, source_id, source_payload,
           created_at, updated_at
         ) VALUES (?, ?, ?, 'PENDING_SIGNERS', 1, ?, ?, ?, ?, ?, ?);
         """,
@@ -250,6 +262,7 @@ def create_cash_request(
             int(admin_tid),
             str(source_kind) if source_kind else None,
             int(source_id) if source_id is not None else None,
+            payload_json,
             now,
             now,
         ),

@@ -1080,6 +1080,10 @@ def create_cashflow_collect_request_if_needed(
     *,
     account: str,
     cash_amount: float,
+    cashless_amount: float,
+    income_type: str,
+    month_id: int,
+    service_date: str,
     created_by_telegram_id: Optional[int],
 ) -> Optional[int]:
     if cash_amount <= 0:
@@ -1090,6 +1094,14 @@ def create_cashflow_collect_request_if_needed(
     if not created_by_telegram_id:
         return None
     import cashflow_models as cf
+
+    payload = {
+        "month_id": int(month_id),
+        "service_date": str(service_date),
+        "cashless": float(cashless_amount),
+        "income_type": str(income_type),
+    }
+    payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     cfg_base = cf.load_cashflow_config(BASE_DIR)
     cfg = cf.CashflowConfig(
@@ -1108,10 +1120,11 @@ def create_cashflow_collect_request_if_needed(
             WHERE account=? AND op_type='collect'
               AND status IN ('PENDING_SIGNERS','PENDING_ADMIN')
               AND amount=? AND created_by_telegram_id=?
+              AND source_kind='service' AND source_payload=?              
             ORDER BY id DESC
             LIMIT 1;
             """,
-            (account_norm, float(cash_amount), int(created_by_telegram_id)),
+            (account_norm, float(cash_amount), int(created_by_telegram_id), payload_json),
         ).fetchone()
         if existing:
             return int(existing["id"])
@@ -1125,8 +1138,94 @@ def create_cashflow_collect_request_if_needed(
             created_by_telegram_id=int(created_by_telegram_id),
             source_kind="service",
             source_id=None,
+            source_payload=payload,
         )
 
+def finalize_cashflow_collect_request(request_id: int) -> Optional[int]:
+    req = db_fetchone("SELECT * FROM cash_requests WHERE id=?;", (int(request_id),))
+    if not req:
+        return None
+    if str(req["status"]) != "FINAL" or str(req["op_type"]) != "collect":
+        return None
+    if str(req.get("source_kind") or "") != "service":
+        return None
+    if req.get("source_id"):
+        return int(req["source_id"])
+    payload_raw = req.get("source_payload")
+    if not payload_raw:
+        return None
+    try:
+        payload = json.loads(payload_raw)
+    except Exception:
+        return None
+    service_date = str(payload.get("service_date") or "").strip()
+    if not service_date:
+        return None
+    try:
+        parse_iso_date(service_date)
+    except Exception:
+        return None
+    month_id_raw = payload.get("month_id")
+    if month_id_raw is None:
+        return None
+    month_id = int(month_id_raw)
+    cashless = float(payload.get("cashless") or 0.0)
+    income_type = str(payload.get("income_type") or "donation").strip().lower()
+    if income_type not in ("donation", "other"):
+        income_type = "donation"
+    account = normalize_account(req["account"])
+    cash = float(req["amount"])
+    total = round(cashless + cash, 2)
+
+    actor_tid = req.get("created_by_telegram_id") or req.get("admin_telegram_id")
+    user_row = None
+    if actor_tid:
+        user_row = db_fetchone("SELECT id FROM users WHERE telegram_id=?;", (int(actor_tid),))
+    user_id = int(user_row["id"]) if user_row else None
+
+    before = db_fetchone(
+        """
+        SELECT * FROM services
+        WHERE month_id=? AND service_date=? AND account=? AND income_type=?;
+        """,
+        (month_id, service_date, account, income_type),
+    )
+
+    now = iso_now(CFG.tzinfo())
+    if before:
+        db_exec(
+            """
+            UPDATE services
+            SET cashless=?, cash=?, total=?, income_type=?, account=?, updated_at=?
+            WHERE id=?;
+            """,
+            (cashless, cash, total, income_type, account, now, before["id"]),
+        )
+        after = db_fetchone("SELECT * FROM services WHERE id=?;", (before["id"],))
+        log_audit(user_id, "UPDATE", "service", int(before["id"]), dict(before), dict(after) if after else None)
+        service_id = int(before["id"])
+    else:
+        service_id = db_exec_returning_id(
+            """
+            INSERT INTO services (
+                month_id, service_date, idx, cashless, cash, total,
+                weekly_min_needed, mnsps_status, pvs_ratio, income_type, account,
+                created_at, updated_at
+            ) VALUES (?, ?, 0, ?, ?, ?, 0, 'Не собрана', 0, ?, ?, ?, ?);
+            """,
+            (month_id, service_date, cashless, cash, total, income_type, account, now, now),
+
+        )
+        after = db_fetchone("SELECT * FROM services WHERE id=?;", (service_id,))
+        log_audit(user_id, "CREATE", "service", int(service_id), None, dict(after) if after else None)
+
+    db_exec(
+        "UPDATE cash_requests SET source_id=?, updated_at=? WHERE id=?;",
+        (service_id, now, int(request_id)),
+    )
+    recalc_services_for_month(month_id)
+    ensure_tithe_expense(month_id, user_id=user_id)
+    return service_id
 
 def register_bot_subscriber(telegram_id: int) -> None:
     now = iso_now(CFG.tzinfo())
@@ -2569,6 +2668,10 @@ async def on_confirm(cq: CallbackQuery):
             request_id = create_cashflow_collect_request_if_needed(
                 account="main",
                 cash_amount=cash,
+                cashless_amount=cashless,
+                income_type="donation",
+                month_id=month_id,
+                service_date=pending["service_date"],
                 created_by_telegram_id=int(tid),
             )
             if request_id:
@@ -3576,6 +3679,10 @@ def create_service(
         request_id = create_cashflow_collect_request_if_needed(
             account=account,
             cash_amount=cash,
+            cashless_amount=cashless,
+            income_type=income_type,
+            month_id=month_id,
+            service_date=service_date,
             created_by_telegram_id=int(u["telegram_id"]),
         )
         if request_id:
