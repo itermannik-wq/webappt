@@ -3342,6 +3342,11 @@ def cashapp():
     return FileResponse(path, media_type="text/html")
 
 
+@APP.get("/favicon.ico")
+def favicon():
+    return Response(status_code=204)
+
+
 
 # ---------------------------
 # Auth
