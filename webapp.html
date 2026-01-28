@@ -44,6 +44,9 @@
       --safe-bot: env(safe-area-inset-bottom);
 
       --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif;
+
+      /* добавлено для blur-оверлеев (модалки/панели) */
+      --overlay-dim: rgba(0,0,0,.26);
     }
 
     /* Light theme fallback */
@@ -57,6 +60,7 @@
       --stroke: rgba(15,23,42,.12);
       --shadow: 0 10px 24px rgba(15,23,42,.10);
       --ring-track: rgba(15,23,42,.08);
+      --overlay-dim: rgba(15,23,42,.22);
     }
 
     *{ box-sizing: border-box; }
@@ -1231,8 +1235,9 @@
     .settingsPanelBackdrop{
       position: absolute;
       inset: 0;
-      background: rgba(0,0,0,.6);
-      backdrop-filter: blur(10px);
+      background: var(--overlay-dim);
+      backdrop-filter: blur(18px) saturate(1.2);
+      -webkit-backdrop-filter: blur(18px) saturate(1.2);
       opacity: 0;
       transition: opacity .22s ease;
     }
@@ -1723,7 +1728,9 @@
     .modalBackdrop{
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,.45);
+      background: var(--overlay-dim);
+      backdrop-filter: blur(18px) saturate(1.2);
+      -webkit-backdrop-filter: blur(18px) saturate(1.2);
       display:none;
       align-items:flex-end;
       justify-content:center;
@@ -2807,9 +2814,9 @@
                   </div>
                 </div>
 
-                <div class="section" id="cashflowSection">
-                  <div class="sectionHeader"><h3>Наличные / Подписи</h3></div>
-                  <div class="card bigCard">
+                  <div class="section" id="cashflowSection">
+                    <div class="sectionHeader"><h3>Наличные / Подписи</h3></div>
+                    <div class="card bigCard allowOverflow">
                     <div class="tabs" id="cashflowTabs" style="margin-bottom:12px;">
                       <button class="tab active" id="cashflowTabRequests" type="button">Запросы</button>
                       <button class="tab" id="cashflowTabAct" type="button">Акт изъятия</button>
@@ -2942,16 +2949,18 @@
                           <thead>
                             <tr>
                               <th>Дата</th>
-                              <th>Сумма Изъятия</th>
+                              <th>Операция</th>
+                              <th>Сумма</th>
                               <th>ФИО</th>
                               <th>Тип пользователя</th>
                               <th>Подпись</th>
                             </tr>
                           </thead>
                           <tbody id="cashflowActBody">
-                            <tr><td colspan="5" class="muted2">Нет данных.</td></tr>
+                            <tr><td colspan="6" class="muted2">Нет данных.</td></tr>
                           </tbody>
                         </table>
+
                       </div>
                     </div>
                   </div>
@@ -7029,7 +7038,7 @@
       const items = data.items || [];
       body.innerHTML = "";
       if (!items.length){
-        body.innerHTML = `<tr><td colspan="5" class="muted2">Нет данных.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="6" class="muted2">Нет данных.</td></tr>`;
         return;
       }
       items.forEach((r)=>{
@@ -7039,9 +7048,11 @@
         const date = r.date || r.created_at || "";
         const fio = r.fio || r.name_snapshot || "";
         const userType = r.user_type || r.role_snapshot || "";
+        const op = fmtCashflowOp(r.op_type || "");
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${escapeHtml(date)}</td>
+          <td>${escapeHtml(op)}</td>
           <td>${Number(r.amount || 0).toFixed(2)}</td>
           <td>${escapeHtml(fio)}</td>
           <td>${escapeHtml(userType)}</td>
@@ -7050,6 +7061,7 @@
         body.appendChild(tr);
       });
     }
+
 
     function setCashflowTab(which){
       const isRequests = which === "requests";

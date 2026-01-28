@@ -461,7 +461,7 @@ def get_signature_png(
 
 
 def _user_can_view_withdraw_act(telegram_id: int, role: str) -> bool:
-    if role == "admin":
+    if role in ("admin", "accountant"):
         return True
     cfg = _cash_cfg()
     allow = m.load_users_allowlist(cfg.users_json_path)
@@ -471,7 +471,9 @@ def _user_can_view_withdraw_act(telegram_id: int, role: str) -> bool:
     ops = u.get("cash_ops") or []
     if isinstance(ops, str):
         ops = [x.strip() for x in ops.split(",") if x.strip()]
-    return str(u.get("role")) == "cash_signer" and "withdraw" in [str(x).lower() for x in ops]
+    ops_n = [str(x).lower() for x in ops]
+    # Акт включает операции наличных (collect/withdraw), поэтому допускаем обе.
+    return str(u.get("role")) == "cash_signer" and ("withdraw" in ops_n or "collect" in ops_n)
 
 
 @router.get("/api/cashflow/withdraw-act")
@@ -479,7 +481,7 @@ def withdraw_act(
     account: Optional[str] = Query(None, description="main|praise|alpha (опционально)"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    u=Depends(_app_require_role("admin", "cash_signer")),
+    u=Depends(_app_require_role("admin", "accountant", "cash_signer")),
 ):
     if not _user_can_view_withdraw_act(int(u["telegram_id"]), str(u["role"])):
         raise HTTPException(status_code=403, detail="No access to withdraw act")
@@ -494,12 +496,17 @@ def withdraw_act_xlsx(
     account: Optional[str] = Query(None, description="main|praise|alpha (опционально)"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    u=Depends(_app_require_role("admin")),
+    u=Depends(_app_require_role("admin", "accountant")),
 ):
-    """Экспорт акта изъятия в Excel.
+    """Экспорт акта наличных (сбор/изъятие) в Excel.
 
-    Формат: одна книга, 3 листа (MAIN/PRAISE/ALPHA), на каждом 5 колонок:
-    Дата, Сумма Изъятия, ФИО, Тип пользователя, Подпись.
+    Формат: одна книга, 3 листа (MAIN/PRAISE/ALPHA), на каждом 6 колонок:
+    Дата, Операция, Сумма, ФИО, Тип пользователя, Подпись.
+
+    В колонке "Подпись":
+      - если подписано и есть signature_path -> вставляем PNG подпись (ту, что рисовали)
+      - если отказ -> текст "ОТКАЗ: причина"
+      - если ожидает -> "Ожидает подписи"
     """
     _ensure_cashflow_tables()
     cfg = _cash_cfg()
@@ -516,49 +523,67 @@ def withdraw_act_xlsx(
         rows_all = m.list_withdraw_act_rows(conn, account=account, date_from=date_from, date_to=date_to)
 
     wb = openpyxl.Workbook()
-    # удаляем дефолтный лист
     wb.remove(wb.active)
 
     def make_sheet(account_code: str, title: str):
         ws = wb.create_sheet(title)
-        ws.append(["Дата", "Сумма Изъятия", "ФИО", "Тип пользователя", "Подпись"])
+        ws.append(["Дата", "Операция", "Сумма", "ФИО", "Тип пользователя", "Подпись"])
         ws.freeze_panes = "A2"
+
         ws.column_dimensions["A"].width = 22
-        ws.column_dimensions["B"].width = 16
-        ws.column_dimensions["C"].width = 32
-        ws.column_dimensions["D"].width = 18
-        ws.column_dimensions["E"].width = 32
+        ws.column_dimensions["B"].width = 18
+        ws.column_dimensions["C"].width = 16
+        ws.column_dimensions["D"].width = 32
+        ws.column_dimensions["E"].width = 18
+        ws.column_dimensions["F"].width = 28  # подпись
 
         rnum = 2
         for r in rows_all:
             if r["account"] != account_code:
                 continue
-            ws.cell(row=rnum, column=1, value=r.get("date"))
-            ws.cell(row=rnum, column=2, value=float(r.get("amount") or 0))
-            ws.cell(row=rnum, column=3, value=r.get("fio"))
-            ws.cell(row=rnum, column=4, value=r.get("user_type"))
 
-            sig_cell = ws.cell(row=rnum, column=5)
-            if r.get("signature_value", "").startswith("ОТКАЗ"):
-                sig_cell.value = r.get("signature_value")
-            elif r.get("signature_path"):
-                # вставляем картинку подписи
+            ws.cell(row=rnum, column=1, value=r.get("date"))
+
+            op = str(r.get("op_type") or "")
+            op_disp = {"collect": "Сбор наличных", "withdraw": "Изъятие наличных"}.get(op, op)
+            ws.cell(row=rnum, column=2, value=op_disp)
+
+            ws.cell(row=rnum, column=3, value=float(r.get("amount") or 0))
+            ws.cell(row=rnum, column=4, value=r.get("fio"))
+            ws.cell(row=rnum, column=5, value=r.get("user_type"))
+
+            sig_cell = ws.cell(row=rnum, column=6)
+            signature_value = r.get("signature_value") or "—"
+            signature_path = r.get("signature_path")
+
+            # делаем строку повыше (чтобы подпись нормально влезала)
+            ws.row_dimensions[rnum].height = 52
+
+            # 1) отказ -> всегда текст
+            if str(signature_value).startswith("ОТКАЗ"):
+                sig_cell.value = signature_value
+
+            # 2) подписано -> пытаемся вставить картинку
+            elif signature_path:
                 try:
-                    img_path = m.get_signature_file_path(cfg, str(r["signature_path"]))
+                    img_path = m.get_signature_file_path(cfg, str(signature_path))
                     if img_path.exists():
                         img = XLImage(str(img_path))
-                        # приводим к разумному размеру
-                        img.width = 240
-                        img.height = 70
-                        anchor = f"{get_column_letter(5)}{rnum}"
+                        img.width = 180
+                        img.height = 60
+                        anchor = f"{get_column_letter(6)}{rnum}"
+                        sig_cell.value = ""  # чтобы в ячейке не было "SIGNED"
                         ws.add_image(img, anchor)
-                        ws.row_dimensions[rnum].height = 55
                     else:
-                        sig_cell.value = "SIGNED"
+                        # файл подписи не найден -> хотя бы корректный текст
+                        sig_cell.value = signature_value
                 except Exception:
-                    sig_cell.value = "SIGNED"
+                    sig_cell.value = signature_value
+
+            # 3) нет подписи -> показываем правильный статус (например "Ожидает подписи")
             else:
-                sig_cell.value = "SIGNED"
+                sig_cell.value = signature_value
+
             rnum += 1
 
     if account:
@@ -567,15 +592,9 @@ def withdraw_act_xlsx(
             raise HTTPException(status_code=400, detail="Invalid account")
         make_sheet(acc, acc.upper())
     else:
-        if account:
-            acc = account.strip().lower()
-            if acc not in m.ACCOUNTS:
-                raise HTTPException(status_code=400, detail="Invalid account")
-            make_sheet(acc, acc.upper())
-        else:
-            make_sheet("main", "MAIN")
-            make_sheet("praise", "PRAISE")
-            make_sheet("alpha", "ALPHA")
+        make_sheet("main", "MAIN")
+        make_sheet("praise", "PRAISE")
+        make_sheet("alpha", "ALPHA")
 
     bio = io.BytesIO()
     wb.save(bio)

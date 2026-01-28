@@ -1,688 +1,1024 @@
 <!doctype html>
 <html lang="ru">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Подтверждение наличных</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-      :root{
-        --bg: #0b0f14;
-        --card: rgba(255,255,255,.06);
-        --card2: rgba(255,255,255,.08);
-        --text: rgba(255,255,255,.92);
-        --muted: rgba(255,255,255,.65);
-        --muted2: rgba(255,255,255,.45);
-        --stroke: rgba(255,255,255,.10);
-        --shadow: 0 10px 30px rgba(0,0,0,.30);
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>Подтверждение наличных</title>
+  <style>
+    :root{
+      --bg:#f3f5f7;
+      --card:#ffffff;
+      --text:#0f172a;
+      --muted:#64748b;
+      --line:rgba(15,23,42,.08);
+      --shadow: 0 10px 30px rgba(15,23,42,.10);
+      --primary:#15b981;
+      --primary2:#10a58a;
+      --danger:#ef4444;
 
-        --accent: #10b981;
-        --accent2: #34d399;
-        --danger: #ef4444;
-        --warn: #f59e0b;
+      --overlay: rgba(255,255,255,.50);
+      --overlay2: rgba(15,23,42,.22);
 
-        --r-card: 18px;
-        --r-btn: 16px;
-        --gap: 16px;
-        --gap8: 8px;
-        --safe-top: env(safe-area-inset-top);
-        --safe-bot: env(safe-area-inset-bottom);
+      --radius:18px;
+      --radius2:14px;
+      --tap: rgba(15,23,42,.06);
+    }
 
-        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif;
-      }
-      html[data-theme="light"]{
-        --bg: #f4f6fa;
-        --card: #ffffff;
-        --card2: #eef2f7;
-        --text: #111827;
-        --muted: #4b5563;
-        --muted2: #6b7280;
-        --stroke: rgba(15,23,42,.12);
-        --shadow: 0 10px 24px rgba(15,23,42,.10);
-      }
-      *{ box-sizing: border-box; }
-      body{
-        margin:0;
-        font-family: var(--font);
-        background: var(--bg);
-        color: var(--text);
-      }
-      .app{
-        max-width: 520px;
-        margin: 0 auto;
-        padding: calc(var(--safe-top) + 12px) 14px calc(var(--safe-bot) + 18px);
-      }
-      .topbar{
-        display:flex;
-        gap:10px;
-        align-items:center;
-        justify-content:space-between;
-        margin-bottom: 12px;
-      }
-      .title{ font-weight: 700; font-size: 18px; letter-spacing:.2px; }
-      .subtitle{ color: var(--muted); font-size: 13px; }
-      .pill{
-        font-size: 12px;
-        padding: 8px 10px;
-        border-radius: 999px;
-        border: 1px solid var(--stroke);
-        background: var(--card);
-        color: var(--muted);
-      }
-      .tabs{
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-        margin-bottom: 12px;
-      }
-      .tab{
-        border: 1px solid var(--stroke);
-        background: transparent;
-        color: var(--text);
-        padding: 8px 12px;
-        border-radius: 999px;
-        cursor:pointer;
-      }
-      .tab.active{
-        background: var(--card2);
-        border-color: rgba(16,185,129,.45);
-        color: var(--text);
-      }
-      .card{
-        background: var(--card);
-        border:1px solid var(--stroke);
-        border-radius: var(--r-card);
-        padding: 14px;
-        box-shadow: var(--shadow);
-      }
-      .row{ display:flex; gap:12px; flex-wrap:wrap; }
-      .col{ flex: 1 1 220px; }
-      .muted{ color: var(--muted); }
-      .btn{
-        border: 1px solid var(--stroke);
-        background: transparent;
-        color: var(--text);
-        padding: 10px 12px;
-        border-radius: var(--r-btn);
-        cursor:pointer;
-        transition: transform .12s ease, background .12s ease;
-      }
-      .btn:active{ transform: scale(.98); }
-      .btn.primary{
-        background: rgba(16,185,129,.18);
-        border-color: rgba(16,185,129,.55);
-      }
-      .btn.danger{
-        background: rgba(239,68,68,.14);
-        border-color: rgba(239,68,68,.55);
-      }
-      .btn.ok{
-        background: rgba(16,185,129,.20);
-        border-color: rgba(16,185,129,.55);
-      }
-      .btn:disabled{ opacity: .55; cursor:not-allowed; }
-      .list{ display:flex; flex-direction:column; gap:12px; }
-      .item{
-        padding: 12px;
-        border:1px solid var(--stroke);
-        border-radius: 16px;
-        background: var(--card2);
-      }
-      .item h4{ margin:0 0 6px; font-size: 15px; }
-      .item .meta{ font-size: 12px; color: var(--muted); display:flex; gap:10px; flex-wrap:wrap; }
-      .badge{
-        font-size: 12px;
-        padding: 3px 8px;
-        border-radius: 999px;
-        border: 1px solid var(--stroke);
-      }
-      .badge.ok{ border-color: rgba(16,185,129,.55); color: var(--accent2); }
-      .badge.danger{ border-color: rgba(239,68,68,.55); color: var(--danger); }
-      .badge.wait{ border-color: rgba(16,185,129,.55); color: var(--accent); }
-      .divider{ height: 1px; background: var(--stroke); margin: 12px 0; }
-      .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
-      @media (max-width: 720px){ .grid2{ grid-template-columns: 1fr; } }
-      .field{ display:flex; flex-direction:column; gap:6px; }
-      textarea, input, select{
-        width:100%;
-        border-radius: 12px;
-        border:1px solid var(--stroke);
-        padding: 10px;
-        background: transparent;
-        color: var(--text);
-      }
-      canvas{
-        width:100%;
-        height: 160px;
-        border-radius: 12px;
-        border:1px dashed var(--stroke);
-        background: var(--card2);
-        touch-action: none;
-      }
-      table{ width:100%; border-collapse: collapse; }
-      th, td{
-        border-bottom: 1px solid var(--stroke);
-        padding: 8px;
-        font-size: 13px;
-        text-align:left;
-        vertical-align: top;
-      }
-      th{ color: var(--muted); font-weight: 700; }
-      .err{ color: var(--danger); white-space: pre-wrap; }
-      .okmsg{ color: var(--accent2); }
-      .link{ color: var(--accent2); text-decoration: underline; cursor:pointer; }
-    </style>
-  </head>
-  <body>
-    <div class="app">
-      <div class="topbar">
-        <div>
-          <div class="title">Подтверждение наличных</div>
-          <div class="subtitle" id="subtitle">Загрузка…</div>
+    html[data-theme="dark"]{
+      --bg:#0b1220;
+      --card:#0f1a2e;
+      --text:#eaf0ff;
+      --muted:rgba(234,240,255,.68);
+      --line:rgba(234,240,255,.08);
+      --shadow: 0 18px 40px rgba(0,0,0,.45);
+      --primary:#19c28f;
+      --primary2:#15b981;
+      --danger:#fb7185;
+
+      --overlay: rgba(0,0,0,.35);
+      --overlay2: rgba(0,0,0,.25);
+
+      --tap: rgba(234,240,255,.06);
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background: radial-gradient(900px 600px at 30% -10%, rgba(21,185,129,.16), transparent 60%),
+                  radial-gradient(900px 600px at 90% 0%, rgba(16,165,138,.14), transparent 62%),
+                  var(--bg);
+      color:var(--text);
+    }
+    .wrap{
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px 14px 26px;
+      padding-bottom: max(26px, env(safe-area-inset-bottom));
+    }
+
+    .topbar{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin: 6px 2px 14px;
+    }
+    .title{
+      line-height:1.1;
+    }
+    .title h1{
+      font-size: 22px;
+      margin:0 0 6px;
+      letter-spacing:-.2px;
+    }
+    .title .sub{
+      font-size: 12px;
+      color: var(--muted);
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.55);
+      border-radius: 999px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    html[data-theme="dark"] .chip{ background: rgba(15,26,46,.72); }
+
+    .actions{
+      display:flex; gap:10px; align-items:center;
+    }
+    .iconBtn{
+      width:42px;height:42px;
+      border-radius: 14px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.60);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display:grid; place-items:center;
+      box-shadow: 0 8px 18px rgba(0,0,0,.08);
+      cursor:pointer;
+      user-select:none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html[data-theme="dark"] .iconBtn{ background: rgba(15,26,46,.76); box-shadow: 0 10px 22px rgba(0,0,0,.25); }
+    .iconBtn:active{ transform: scale(.98); background: var(--tap); }
+
+    .card{
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .cardPad{ padding: 14px; }
+
+    .seg{
+      display:flex;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 999px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    html[data-theme="dark"] .seg{ background: rgba(15,26,46,.72); }
+    .seg button{
+      flex:1;
+      border:0;
+      border-radius: 999px;
+      padding: 10px 12px;
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--muted);
+      background: transparent;
+      cursor:pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .seg button.active{
+      color: var(--text);
+      background: rgba(21,185,129,.14);
+      border: 1px solid rgba(21,185,129,.25);
+      box-shadow: 0 10px 18px rgba(21,185,129,.12);
+    }
+
+    .row{
+      display:flex;
+      gap: 10px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+    }
+    .field{
+      flex:1;
+      min-width: 160px;
+    }
+    .label{
+      font-size:12px;
+      color: var(--muted);
+      margin: 6px 2px 6px;
+      font-weight:700;
+    }
+
+    /* --- Fancy Dropdown (portal, no clipping) --- */
+    .dropdown{ position:relative; }
+    .ddTrigger{
+      width:100%;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding: 12px 12px;
+      border-radius: var(--radius2);
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.70);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: var(--text);
+      font-weight: 800;
+      cursor:pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html[data-theme="dark"] .ddTrigger{ background: rgba(15,26,46,.76); }
+    .ddTrigger:active{ background: var(--tap); transform: scale(.99); }
+    .ddValue{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .ddChevron{
+      width: 20px; height: 20px; flex: 0 0 auto;
+      opacity:.8;
+      transition: transform .18s ease;
+    }
+    .dropdown.open .ddChevron{ transform: rotate(180deg); }
+
+    .ddPortal{
+      position:fixed;
+      inset:0;
+      z-index: 9999;
+      background: var(--overlay2);
+      backdrop-filter: blur(16px) saturate(1.2);
+      -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    }
+    .ddPanel{
+      position:fixed;
+      min-width: 240px;
+      max-width: min(560px, calc(100vw - 24px));
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.92);
+      box-shadow: 0 24px 55px rgba(0,0,0,.22);
+      overflow:hidden;
+      transform: translateY(-6px) scale(.985);
+      opacity: 0;
+      transition: transform .18s ease, opacity .18s ease;
+    }
+    html[data-theme="dark"] .ddPanel{
+      background: rgba(15,26,46,.92);
+      box-shadow: 0 28px 70px rgba(0,0,0,.55);
+    }
+    .ddPanel.show{ transform: translateY(0) scale(1); opacity: 1; }
+    .ddList{ max-height: min(52vh, 360px); overflow:auto; padding: 8px; }
+    .ddOpt{
+      width:100%;
+      text-align:left;
+      border:0;
+      background: transparent;
+      color: var(--text);
+      font-weight: 800;
+      padding: 12px 12px;
+      border-radius: 12px;
+      cursor:pointer;
+    }
+    .ddOpt small{ display:block; font-weight:700; color: var(--muted); margin-top: 2px; }
+    .ddOpt:hover{ background: rgba(21,185,129,.10); }
+    .ddOpt:active{ background: rgba(21,185,129,.16); }
+
+    /* --- Buttons --- */
+    .btn{
+      border:0;
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-weight: 900;
+      cursor:pointer;
+      -webkit-tap-highlight-color: transparent;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      min-height: 44px;
+      white-space:nowrap;
+    }
+    .btnPrimary{
+      background: linear-gradient(180deg, var(--primary), var(--primary2));
+      color:#fff;
+      box-shadow: 0 14px 26px rgba(21,185,129,.25);
+    }
+    .btnGhost{
+      background: rgba(255,255,255,.65);
+      color: var(--text);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    html[data-theme="dark"] .btnGhost{ background: rgba(15,26,46,.78); }
+    .btnDanger{
+      background: rgba(239,68,68,.12);
+      border:1px solid rgba(239,68,68,.25);
+      color: var(--danger);
+    }
+    .btn:active{ transform: scale(.99); }
+
+    .sp12{ height:12px; }
+    .sp8{ height:8px; }
+    .muted{ color: var(--muted); }
+    .small{ font-size: 12px; }
+
+    /* --- List --- */
+    .list{ display:flex; flex-direction:column; gap:10px; }
+    .item{
+      padding: 12px 12px;
+      border-radius: 16px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.60);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      cursor:pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html[data-theme="dark"] .item{ background: rgba(15,26,46,.72); }
+    .item:active{ background: var(--tap); transform: scale(.995); }
+    .itemTop{
+      display:flex; justify-content:space-between; gap:10px; align-items:baseline;
+      font-weight: 950;
+    }
+    .itemTop .sum{ font-size: 16px; letter-spacing:-.2px; }
+    .itemMeta{
+      margin-top: 6px;
+      display:flex; gap:10px; flex-wrap:wrap;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 800;
+    }
+    .badge{
+      padding: 5px 10px;
+      border-radius: 999px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--muted);
+    }
+    html[data-theme="dark"] .badge{ background: rgba(15,26,46,.76); }
+
+    /* --- Modal / Sheet --- */
+    .modalBackdrop{
+      position:fixed;
+      inset:0;
+      z-index: 20000;
+      background: var(--overlay2);
+      backdrop-filter: blur(18px) saturate(1.2);
+      -webkit-backdrop-filter: blur(18px) saturate(1.2);
+      display:none;
+      padding: 14px;
+      padding-top: max(14px, env(safe-area-inset-top));
+      padding-bottom: max(14px, env(safe-area-inset-bottom));
+    }
+    .modalBackdrop.show{ display:flex; }
+    .modal{
+      width: min(720px, 100%);
+      margin: 0 auto;
+      border-radius: 22px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.92);
+      box-shadow: 0 30px 80px rgba(0,0,0,.30);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      max-height: 100%;
+    }
+    html[data-theme="dark"] .modal{ background: rgba(15,26,46,.92); box-shadow: 0 40px 90px rgba(0,0,0,.65); }
+    .modalHead{
+      padding: 14px 14px 10px;
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .modalHead .h{
+      font-size: 16px;
+      font-weight: 950;
+      letter-spacing:-.2px;
+    }
+    .modalBody{
+      padding: 14px;
+      overflow:auto;
+    }
+    .closeX{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.60);
+      color: var(--text);
+      width: 40px; height: 40px;
+      border-radius: 14px;
+      display:grid; place-items:center;
+      cursor:pointer;
+    }
+    html[data-theme="dark"] .closeX{ background: rgba(15,26,46,.76); }
+    .closeX:active{ transform: scale(.98); background: var(--tap); }
+
+    /* --- Signature canvas --- */
+    .sigWrap{
+      border:1px solid var(--line);
+      border-radius: 16px;
+      overflow:hidden;
+      background: rgba(255,255,255,.60);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    html[data-theme="dark"] .sigWrap{ background: rgba(15,26,46,.72); }
+    canvas{
+      display:block;
+      width: 100%;
+      height: 160px;
+      touch-action: none;
+    }
+
+    /* --- Toast --- */
+    .toast{
+      position:fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: max(18px, env(safe-area-inset-bottom));
+      z-index: 30000;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 18px 45px rgba(0,0,0,.18);
+      font-weight: 900;
+      display:none;
+    }
+    html[data-theme="dark"] .toast{ background: rgba(15,26,46,.85); box-shadow: 0 22px 60px rgba(0,0,0,.45); }
+    .toast.show{ display:block; }
+
+    .hidden{ display:none !important; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="title">
+        <h1>Подтверждение наличных</h1>
+        <div class="sub">
+          <span id="statusLine" class="muted">Подключение…</span>
+          <span id="roleChip" class="chip hidden"></span>
         </div>
-        <div class="pill" id="mePill">—</div>
       </div>
-
-      <div class="tabs">
-        <button class="tab active" id="tabRequests">Запросы</button>
-        <button class="tab" id="tabAct">Акт изъятия</button>
+      <div class="actions">
+        <button id="themeBtn" class="iconBtn" type="button" title="Тема">🌓</button>
+        <button id="refreshBtn" class="iconBtn" type="button" title="Обновить">⟳</button>
       </div>
-
-      <div class="card" id="panelRequests">
-        <div class="row" style="align-items:end;">
-          <div class="col">
-            <div class="field">
-              <label class="muted">Счёт</label>
-              <select id="accountSel">
-                <option value="">Все</option>
-                <option value="main">Основной</option>
-                <option value="praise">Прославление</option>
-                <option value="alpha">Альфа курс</option>
-              </select>
-            </div>
-          </div>
-          <div class="col">
-            <div class="field">
-              <label class="muted">Фильтр</label>
-              <select id="openSel">
-                <option value="1">Только ожидающие</option>
-                <option value="0">Все</option>
-              </select>
-            </div>
-          </div>
-          <div style="min-width:140px;">
-            <button class="btn primary" id="btnReload">Обновить</button>
-          </div>
-        </div>
-
-        <div class="divider"></div>
-        <div id="list" class="list"></div>
-
-        <div class="divider"></div>
-        <div id="detail" style="display:none;"></div>
-      </div>
-
-      <div class="card" id="panelAct" style="display:none;">
-        <div class="row" style="align-items:end;">
-          <div class="col">
-            <div class="field">
-              <label class="muted">Счёт</label>
-              <select id="actAccountSel">
-                <option value="">Все</option>
-                <option value="main">Основной</option>
-                <option value="praise">Прославление</option>
-                <option value="alpha">Альфа курс</option>
-              </select>
-            </div>
-          </div>
-          <div style="min-width:140px;">
-            <button class="btn primary" id="btnActReload">Обновить</button>
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div id="actErr" class="err" style="display:none;"></div>
-        <div style="overflow:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Сумма</th>
-                <th>ФИО</th>
-                <th>Тип</th>
-                <th>Подпись</th>
-              </tr>
-            </thead>
-            <tbody id="actBody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="divider"></div>
-      <div id="msg" class="err" style="display:none;"></div>
-      <div id="ok" class="okmsg" style="display:none;"></div>
     </div>
 
-    <script>
-      const tg = window.Telegram?.WebApp;
+    <div class="card cardPad">
+      <div class="seg" role="tablist" aria-label="Разделы">
+        <button id="tabRequests" class="active" type="button" role="tab" aria-selected="true">Запросы</button>
+        <button id="tabHistory" type="button" role="tab" aria-selected="false">История</button>
+      </div>
 
-      function detectTheme(){
-        try{
-          const bg = tg?.themeParams?.bg_color;
-          if (!bg) return null;
-          // простое правило: светлый если яркость высокая
-          const h = bg.replace('#','');
-          const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
-          const y = (r*299 + g*587 + b*114)/1000;
-          return y > 155 ? 'light' : 'dark';
-        }catch{ return null; }
+      <div class="sp12"></div>
+
+      <!-- Filters -->
+      <div class="row">
+        <div class="field">
+          <div class="label">Счёт</div>
+          <div class="dropdown" data-dd="account">
+            <select id="accountSel" class="hidden">
+              <option value="">Все</option>
+              <option value="main">MAIN • Основной</option>
+              <option value="praise">PRAISE • Хвала</option>
+              <option value="alpha">ALPHA • Альфа</option>
+            </select>
+            <button class="ddTrigger" type="button" aria-expanded="false">
+              <span class="ddValue" id="accountLabel">Все</span>
+              <svg class="ddChevron" viewBox="0 0 24 24" fill="none">
+                <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="field" style="min-width:210px">
+          <div class="label">Показывать</div>
+          <div class="dropdown" data-dd="scope">
+            <select id="scopeSel" class="hidden">
+              <option value="open">Ожидают моей подписи</option>
+              <option value="all">Все</option>
+            </select>
+            <button class="ddTrigger" type="button" aria-expanded="false">
+              <span class="ddValue" id="scopeLabel">Ожидают моей подписи</span>
+              <svg class="ddChevron" viewBox="0 0 24 24" fill="none">
+                <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sp12"></div>
+
+      <!-- Lists -->
+      <div id="listWrap" class="list"></div>
+      <div id="emptyWrap" class="muted small hidden">Нет запросов.</div>
+    </div>
+  </div>
+
+  <!-- Detail modal -->
+  <div id="detailBackdrop" class="modalBackdrop" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal">
+      <div class="modalHead">
+        <div>
+          <div class="h" id="detailTitle">Запрос</div>
+          <div class="muted small" id="detailSub"></div>
+        </div>
+        <button id="detailClose" class="closeX" type="button" aria-label="Закрыть">✕</button>
+      </div>
+      <div class="modalBody">
+        <div id="detailInfo" class="muted small"></div>
+        <div class="sp12"></div>
+
+        <div id="sigBlock">
+          <div class="label">Подпись</div>
+          <div class="sigWrap">
+            <canvas id="sigCanvas"></canvas>
+          </div>
+          <div class="sp8"></div>
+          <div class="row">
+            <button id="sigClear" class="btn btnGhost" type="button">Очистить</button>
+            <button id="sigSend" class="btn btnPrimary" type="button">Подписать</button>
+          </div>
+
+          <div class="sp12"></div>
+          <div class="label">Отказ</div>
+          <textarea id="refuseReason" rows="3" style="
+            width:100%;
+            border-radius:16px;
+            border:1px solid var(--line);
+            background: rgba(255,255,255,.70);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            color: var(--text);
+            padding: 12px 12px;
+            font-weight:800;
+            outline:none;
+            resize: vertical;
+          " placeholder="Причина отказа (обязательно)"></textarea>
+          <div class="sp8"></div>
+          <button id="refuseBtn" class="btn btnDanger" type="button">Отказаться</button>
+        </div>
+
+        <div id="finalBlock" class="hidden">
+          <div class="badge">Вы уже ответили на этот запрос</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    /**********************
+     * Theme
+     **********************/
+    function detectTelegramTheme(){
+      try{
+        const tg = window.Telegram && window.Telegram.WebApp;
+        const p = tg && tg.themeParams;
+        const bg = p && (p.bg_color || p.secondary_bg_color);
+        if (!bg) return null;
+        // crude brightness check
+        const c = bg.replace('#','');
+        if (c.length !== 6) return null;
+        const r = parseInt(c.slice(0,2),16);
+        const g = parseInt(c.slice(2,4),16);
+        const b = parseInt(c.slice(4,6),16);
+        const lum = (0.2126*r + 0.7152*g + 0.0722*b);
+        return lum < 130 ? "dark" : "light";
+      }catch{ return null; }
+    }
+    function applyTheme(theme){
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem("cashapp_theme", theme);
+      // recolor canvas stroke
+      if (Pad.ctx){
+        Pad.ctx.strokeStyle = theme === "dark" ? "#eaf0ff" : "#0f172a";
+      }
+    }
+    function initTheme(){
+      const saved = localStorage.getItem("cashapp_theme");
+      if (saved === "light" || saved === "dark"){
+        applyTheme(saved);
+        return;
+      }
+      const tgTheme = detectTelegramTheme();
+      if (tgTheme){
+        applyTheme(tgTheme);
+        return;
+      }
+      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(prefersDark ? "dark" : "light");
+    }
+
+    /**********************
+     * API helper
+     **********************/
+    const API = {
+      baseUrl: "",
+      async req(method, path, body){
+        const res = await fetch(this.baseUrl + path, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const txt = await res.text();
+        let data = null;
+        try{ data = txt ? JSON.parse(txt) : null; } catch { data = txt; }
+        if (!res.ok){
+          const msg = (data && data.detail) ? data.detail : (typeof data === "string" ? data : "Ошибка запроса");
+          throw new Error(msg);
+        }
+        return data;
+      },
+      get(p){ return this.req("GET", p); },
+      post(p,b){ return this.req("POST", p, b); },
+    };
+
+    /**********************
+     * UI helpers
+     **********************/
+    const $ = (id)=>document.getElementById(id);
+
+    function toast(msg){
+      const t = $("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(toast._t);
+      toast._t = setTimeout(()=> t.classList.remove("show"), 2400);
+    }
+
+    function fmtMoney(n){
+      const x = Number(n||0);
+      return x.toLocaleString("ru-RU", {minimumFractionDigits:2, maximumFractionDigits:2});
+    }
+    function fmtAccount(a){
+      const v = (a||"").toLowerCase();
+      if (v==="main") return "MAIN • Основной";
+      if (v==="praise") return "PRAISE • Хвала";
+      if (v==="alpha") return "ALPHA • Альфа";
+      return a || "—";
+    }
+    function fmtOp(t){
+      const v = (t||"").toLowerCase();
+      if (v==="withdraw") return "Изъятие";
+      if (v==="collect") return "Сбор";
+      return t || "—";
+    }
+    function fmtDateTime(iso){
+      try{
+        const d = new Date(iso);
+        return d.toLocaleString("ru-RU", {day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"});
+      }catch{ return iso || "—"; }
+    }
+
+    /**********************
+     * Fancy Dropdown (portal)
+     **********************/
+    function makeDropdown(selectId, labelId){
+      const sel = $(selectId);
+      const root = sel.closest(".dropdown");
+      const btn = root.querySelector(".ddTrigger");
+      const label = $(labelId);
+
+      function syncLabel(){
+        const opt = sel.options[sel.selectedIndex];
+        label.textContent = opt ? opt.textContent : "—";
       }
 
-      function applyTheme(){
-        const t = detectTheme();
-        document.documentElement.dataset.theme = t || 'dark';
-      }
+      let portal = null;
+      let panel = null;
+      let open = false;
 
-      applyTheme();
-      try{ tg?.ready(); tg?.expand(); }catch{}
+      function buildPanel(){
+        portal = document.createElement("div");
+        portal.className = "ddPortal";
+        panel = document.createElement("div");
+        panel.className = "ddPanel";
+        const list = document.createElement("div");
+        list.className = "ddList";
 
-      const API = {
-        token: null,
-        user: null,
-        baseUrl: location.origin,
-        async auth(){
-          const initData = tg?.initData || "";
-          if (!initData) throw new Error("Нет initData. Откройте через Telegram.");
-          const res = await fetch(`${API.baseUrl}/api/auth/telegram`,{
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({initData})
+        Array.from(sel.options).forEach((o)=>{
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "ddOpt";
+          b.dataset.value = o.value;
+          b.textContent = o.textContent;
+          b.addEventListener("click", ()=>{
+            sel.value = o.value;
+            sel.dispatchEvent(new Event("change", {bubbles:true}));
+            close();
           });
-          if (!res.ok) throw new Error(`Auth failed: ${res.status}`);
-          const data = await res.json();
-          API.token = data.token;
-          API.user = data.user;
-          localStorage.setItem('cashflowToken', API.token);
-          localStorage.setItem('cashflowUser', JSON.stringify(API.user));
-        },
-        async ensure(){
-          if (!API.token) {
-            API.token = localStorage.getItem('cashflowToken');
-            try{ API.user = JSON.parse(localStorage.getItem('cashflowUser')||'null'); }catch{}
-          }
-          if (!API.token) return API.auth();
-          try{
-            const me = await API.get('/api/me');
-            API.user = me;
-            localStorage.setItem('cashflowUser', JSON.stringify(API.user));
-          }
-          catch{ return API.auth(); }
-        },
-        async req(path, opts={}){
-          const headers = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
-          if (API.token) headers.Authorization = `Bearer ${API.token}`;
-          const res = await fetch(`${API.baseUrl}${path}`, { ...opts, headers });
-          if (!res.ok) {
-            const t = await res.text().catch(()=>"");
-            throw new Error(`${res.status}: ${t||'Request failed'}`);
-          }
-          const ctype = (res.headers.get('content-type')||'');
-          if (ctype.includes('application/json')) return res.json();
-          return res.text();
-        },
-        get(path){ return API.req(path, {method:'GET'}); },
-        post(path, body){ return API.req(path, {method:'POST', body: JSON.stringify(body)}); }
-      };
+          list.appendChild(b);
+        });
 
-      const UI = {
-        msg: document.getElementById('msg'),
-        ok: document.getElementById('ok'),
-        subtitle: document.getElementById('subtitle'),
-        mePill: document.getElementById('mePill'),
-        list: document.getElementById('list'),
-        detail: document.getElementById('detail'),
-        tabRequests: document.getElementById('tabRequests'),
-        tabAct: document.getElementById('tabAct'),
-        panelRequests: document.getElementById('panelRequests'),
-        panelAct: document.getElementById('panelAct'),
-        accountSel: document.getElementById('accountSel'),
-        openSel: document.getElementById('openSel'),
-        btnReload: document.getElementById('btnReload'),
-        actAccountSel: document.getElementById('actAccountSel'),
-        btnActReload: document.getElementById('btnActReload'),
-        actBody: document.getElementById('actBody'),
-        actErr: document.getElementById('actErr'),
-      };
+        panel.appendChild(list);
+        portal.appendChild(panel);
+        document.body.appendChild(portal);
 
-      function showErr(e){
-        UI.ok.style.display='none';
-        UI.msg.style.display='block';
-        UI.msg.textContent = (e && e.message) ? e.message : String(e||'Ошибка');
-      }
-      function showOk(t){
-        UI.msg.style.display='none';
-        UI.ok.style.display='block';
-        UI.ok.textContent = t;
-        setTimeout(()=>{ UI.ok.style.display='none'; }, 2500);
+        // Close on backdrop click
+        portal.addEventListener("click", (e)=>{
+          if (e.target === portal) close();
+        });
       }
 
-      function fmtAccount(a){
-        return {main:'Основной', praise:'Прославление', alpha:'Альфа курс'}[a] || a;
-      }
-      function fmtOp(t){
-        return {collect:'Сбор', withdraw:'Изъятие'}[t] || t;
-      }
-      function fmtStatus(s){
-        return {
-          PENDING_SIGNERS:'Ожидает подписантов',
-          PENDING_ADMIN:'Ожидает админа',
-          FINAL:'Завершено',
-          CANCELLED:'Отменено'
-        }[s] || s;
+      function position(){
+        if (!panel) return;
+        const r = btn.getBoundingClientRect();
+        const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+        const vh = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+
+        const margin = 10;
+        const width = Math.min(Math.max(r.width, 260), vw - margin*2);
+        let left = Math.min(Math.max(r.left, margin), vw - width - margin);
+
+        // open up if needed
+        const spaceBelow = vh - r.bottom - margin;
+        const spaceAbove = r.top - margin;
+        const wantHeight = Math.min(360, Math.floor(vh * 0.52));
+        const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+
+        const maxH = Math.min(wantHeight, openUp ? (spaceAbove - 8) : (spaceBelow - 8));
+        panel.style.width = width + "px";
+        panel.style.left = left + "px";
+        panel.style.maxHeight = Math.max(160, maxH) + "px";
+        if (openUp){
+          panel.style.top = "auto";
+          panel.style.bottom = (vh - r.top + 8) + "px";
+        } else {
+          panel.style.bottom = "auto";
+          panel.style.top = (r.bottom + 8) + "px";
+        }
       }
 
-      function badgeForStatus(s){
-        if (s==='FINAL') return `<span class="badge ok">${fmtStatus(s)}</span>`;
-        if (s==='CANCELLED') return `<span class="badge danger">${fmtStatus(s)}</span>`;
-        return `<span class="badge wait">${fmtStatus(s)}</span>`;
+      function show(){
+        if (open) return;
+        open = true;
+        root.classList.add("open");
+        btn.setAttribute("aria-expanded","true");
+        buildPanel();
+        position();
+        requestAnimationFrame(()=> panel && panel.classList.add("show"));
+
+        window.addEventListener("resize", position, {passive:true});
+        window.addEventListener("scroll", position, {passive:true});
+        document.addEventListener("keydown", onKey);
       }
 
-      function qs(name){ return new URLSearchParams(location.search).get(name); }
+      function close(){
+        if (!open) return;
+        open = false;
+        root.classList.remove("open");
+        btn.setAttribute("aria-expanded","false");
+        window.removeEventListener("resize", position);
+        window.removeEventListener("scroll", position);
+        document.removeEventListener("keydown", onKey);
 
-      // -------- Signature Canvas
-      function makeCanvasPad(){
-        const wrap = document.createElement('div');
-        const canvas = document.createElement('canvas');
-        const btnRow = document.createElement('div');
-        btnRow.style.display='flex';
-        btnRow.style.gap='10px';
-        btnRow.style.marginTop='10px';
-        const btnClear = document.createElement('button');
-        btnClear.className='btn';
-        btnClear.textContent='Очистить';
-        btnRow.appendChild(btnClear);
-        wrap.appendChild(canvas);
-        wrap.appendChild(btnRow);
+        if (panel) panel.classList.remove("show");
+        const p = portal;
+        portal = null; panel = null;
+        setTimeout(()=>{
+          if (p && p.parentNode) p.parentNode.removeChild(p);
+        }, 180);
+      }
 
-        // hi-dpi setup
-        function resize(){
-          const rect = canvas.getBoundingClientRect();
+      function onKey(e){
+        if (e.key === "Escape") close();
+      }
+
+      btn.addEventListener("click", (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        open ? close() : show();
+      });
+
+      sel.addEventListener("change", syncLabel);
+      syncLabel();
+      return { close, syncLabel };
+    }
+
+    /**********************
+     * Signature pad
+     **********************/
+    const Pad = {
+      canvas: null,
+      ctx: null,
+      drawing: false,
+      last: null,
+      init(){
+        this.canvas = $("sigCanvas");
+        this.ctx = this.canvas.getContext("2d");
+
+        const resize = ()=>{
+          const rect = this.canvas.getBoundingClientRect();
           const dpr = window.devicePixelRatio || 1;
-          canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-          canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-          const ctx = canvas.getContext('2d');
-          ctx.scale(dpr, dpr);
-          ctx.lineWidth = 2.2;
-          ctx.lineCap = 'round';
-          ctx.strokeStyle = '#111';
-          // theme
-          if (document.documentElement.dataset.theme === 'dark') ctx.strokeStyle = '#e8eefc';
-        }
+          this.canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+          this.canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+          this.ctx.setTransform(dpr,0,0,dpr,0,0);
+          this.ctx.lineWidth = 2.4;
+          this.ctx.lineCap = "round";
+          this.ctx.strokeStyle = document.documentElement.dataset.theme === "dark" ? "#eaf0ff" : "#0f172a";
+        };
 
-        let drawing = false;
-        let last = null;
-        function pos(e){
-          const rect = canvas.getBoundingClientRect();
-          const x = (e.clientX - rect.left);
-          const y = (e.clientY - rect.top);
-          return {x,y};
-        }
-        function start(e){ drawing=true; last = pos(e); }
-        function move(e){
-          if (!drawing) return;
+        const pos = (e)=>{
+          const rect = this.canvas.getBoundingClientRect();
+          return { x: (e.clientX - rect.left), y: (e.clientY - rect.top) };
+        };
+
+        const start = (e)=>{ this.drawing = true; this.last = pos(e); };
+        const move = (e)=>{
+          if (!this.drawing) return;
           const p = pos(e);
-          const ctx = canvas.getContext('2d');
-          ctx.beginPath();
-          ctx.moveTo(last.x, last.y);
-          ctx.lineTo(p.x, p.y);
-          ctx.stroke();
-          last = p;
-        }
-        function end(){ drawing=false; last=null; }
+          this.ctx.beginPath();
+          this.ctx.moveTo(this.last.x, this.last.y);
+          this.ctx.lineTo(p.x, p.y);
+          this.ctx.stroke();
+          this.last = p;
+        };
+        const end = ()=>{ this.drawing = false; this.last = null; };
 
-        canvas.addEventListener('pointerdown', (e)=>{ canvas.setPointerCapture(e.pointerId); start(e); });
-        canvas.addEventListener('pointermove', move);
-        canvas.addEventListener('pointerup', end);
-        canvas.addEventListener('pointercancel', end);
-        btnClear.addEventListener('click', ()=>{
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0,0,canvas.width,canvas.height);
-        });
-        window.addEventListener('resize', resize);
+        this.canvas.addEventListener("pointerdown", (e)=>{ this.canvas.setPointerCapture(e.pointerId); start(e); });
+        this.canvas.addEventListener("pointermove", move);
+        this.canvas.addEventListener("pointerup", end);
+        this.canvas.addEventListener("pointercancel", end);
+
+        window.addEventListener("resize", resize);
         setTimeout(resize, 0);
+      },
+      clear(){
+        if (!this.ctx) return;
+        this.ctx.clearRect(0,0,this.canvas.width, this.canvas.height);
+      },
+      dataUrl(){
+        return this.canvas.toDataURL("image/png");
+      }
+    };
 
-        function dataUrl(){
-          // берём отрендеренный canvas
-          return canvas.toDataURL('image/png');
-        }
-        return {wrap, dataUrl};
+    /**********************
+     * State + screens
+     **********************/
+    const State = {
+      me: null,
+      tab: "requests",
+      currentId: null,
+      dropdowns: {},
+    };
+
+    function setTab(tab){
+      State.tab = tab;
+      $("tabRequests").classList.toggle("active", tab==="requests");
+      $("tabHistory").classList.toggle("active", tab==="history");
+      $("tabRequests").setAttribute("aria-selected", tab==="requests" ? "true":"false");
+      $("tabHistory").setAttribute("aria-selected", tab==="history" ? "true":"false");
+      loadList().catch(e=> toast(String(e.message||e)));
+    }
+
+    function showDetail(show){
+      const b = $("detailBackdrop");
+      b.classList.toggle("show", !!show);
+      b.setAttribute("aria-hidden", show ? "false":"true");
+      document.body.style.overflow = show ? "hidden" : "";
+    }
+
+    async function loadList(){
+      $("emptyWrap").classList.add("hidden");
+      $("listWrap").innerHTML = '<div class="muted small">Загрузка…</div>';
+
+      const account = $("accountSel").value || "";
+      const scope = $("scopeSel").value || "open";
+
+      const q = new URLSearchParams();
+      if (account) q.set("account", account);
+      q.set("only_open", scope === "open" ? "true" : "false");
+
+      const data = await API.get(`/api/cashflow/requests/my?${q.toString()}`);
+      const items = (data && data.items) ? data.items : [];
+
+      if (!items.length){
+        $("listWrap").innerHTML = "";
+        $("emptyWrap").classList.remove("hidden");
+        return;
       }
 
-      // -------- Screens
-      async function loadList(){
-        UI.detail.style.display='none';
-        UI.detail.innerHTML='';
-        UI.list.innerHTML = '<div class="muted">Загрузка…</div>';
-        const account = UI.accountSel.value || '';
-        const onlyOpen = UI.openSel.value === '1';
-        const q = new URLSearchParams();
-        if (account) q.set('account', account);
-        q.set('only_open', onlyOpen ? 'true' : 'false');
-        const data = await API.get(`/api/cashflow/requests/my?${q.toString()}`);
-        const items = data.items || [];
-        if (!items.length){
-          UI.list.innerHTML = '<div class="muted">Нет запросов.</div>';
-          return;
-        }
-        UI.list.innerHTML = '';
-        for (const it of items){
-          const el = document.createElement('div');
-          el.className = 'item';
-          el.innerHTML = `
-            <h4>${fmtOp(it.op_type)} • ${fmtAccount(it.account)} • ${Number(it.amount).toFixed(2)}</h4>
-            <div class="meta">
-              ${badgeForStatus(it.status)}
-              <span>${it.created_at || ''}</span>
-              <span class="link" data-open="${it.id}">Открыть</span>
-            </div>
-          `;
-          el.querySelector('[data-open]')?.addEventListener('click', ()=> openDetail(it.id));
-          UI.list.appendChild(el);
-        }
-      }
-
-      function renderParticipants(parts){
-        const rows = parts.map(p=>{
-          const st = p.state;
-          let badge = '<span class="badge wait">Ожидает</span>';
-          if (st==='SIGNED') badge = '<span class="badge ok">Подписано</span>';
-          if (st==='REFUSED_NEEDS_RETRY') badge = '<span class="badge danger">Отказ (нужно повторно)</span>';
-          if (st==='REFUSED_FINAL') badge = '<span class="badge danger">ОТКАЗ</span>';
-          return `
-            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
-              <div>
-                <div style="font-weight:700;">${p.name}${p.is_admin ? ' (админ)' : ''}</div>
-                <div class="muted" style="font-size:12px;">${p.role}${p.detail ? ' • ' + p.detail : ''}</div>
-              </div>
-              <div>${badge}</div>
-            </div>
-          `;
-        }).join('');
-        return `<div>${rows}</div>`;
-      }
-
-      async function openDetail(id){
-        UI.detail.style.display='block';
-        UI.detail.innerHTML = '<div class="muted">Загрузка…</div>';
-        const data = await API.get(`/api/cashflow/requests/${id}`);
-        const r = data.request;
-        const parts = data.participants || [];
-        const meId = Number(API.user?.telegram_id ?? tg?.initDataUnsafe?.user?.id ?? API.user?.id);
-        const mePart = parts.find(p=> Number(p.telegram_id) === meId);
-        const isAdminUser = API.user?.role === 'admin';
-        const isSignerUser = API.user?.role === 'cash_signer';
-        const isAdminParticipant = Boolean(mePart && mePart.is_admin && isAdminUser);
-        const isClosed = r.status === 'FINAL' || r.status === 'CANCELLED';
-        const signerParticipant = Boolean(mePart && !mePart.is_admin);
-        const signerState = mePart?.state;
-        const canSignerAct = !isClosed && signerParticipant && (
-          signerState === 'PENDING' || signerState === 'REFUSED_NEEDS_RETRY'
-        );
-
-        const canAdminAct = !isClosed && isAdminParticipant && mePart && (signerState === 'PENDING');
-
-
-        const actAllowed = canSignerAct || canAdminAct || (!mePart && isSignerUser);
-
-
-        const wrap = document.createElement('div');
-        wrap.innerHTML = `
-          <div class="item" style="background:transparent;">
-            <div class="meta" style="margin-bottom:8px;">${badgeForStatus(r.status)} <span>ID: ${r.id}</span></div>
-            <h4>${fmtOp(r.op_type)} • ${fmtAccount(r.account)} • ${Number(r.amount).toFixed(2)}</h4>
-            ${r.admin_comment ? `<div class="muted" style="margin-top:6px;">Комментарий админа: <i>${r.admin_comment}</i></div>` : ''}
+      $("listWrap").innerHTML = "";
+      for (const it of items){
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="itemTop">
+            <div class="sum">${fmtMoney(it.amount)} ₽</div>
+            <span class="badge">${String(it.status||"").replaceAll("_"," ")}</span>
           </div>
-          <div class="divider"></div>
-          <div>
-            <div class="muted" style="margin-bottom:8px;">Участники</div>
-            ${renderParticipants(parts)}
+          <div class="itemMeta">
+            <span>${fmtOp(it.op_type)}</span>
+            <span>•</span>
+            <span>${fmtAccount(it.account)}</span>
+            <span>•</span>
+            <span>${fmtDateTime(it.created_at)}</span>
           </div>
-          <div class="divider"></div>
         `;
+        el.addEventListener("click", ()=> openDetail(it.id));
+        $("listWrap").appendChild(el);
+      }
+    }
 
-        if (!actAllowed){
-          const note = document.createElement('div');
-          note.className='muted';
-          note.textContent = 'Действие недоступно (уже выполнено или запрос не ожидает подпись).';
-          wrap.appendChild(note);
-          UI.detail.innerHTML='';
-          UI.detail.appendChild(wrap);
-          return;
-        }
+    async function openDetail(id){
+      State.currentId = id;
+      showDetail(true);
+      $("detailInfo").textContent = "Загрузка…";
+      $("detailSub").textContent = "";
+      $("finalBlock").classList.add("hidden");
+      $("sigBlock").classList.remove("hidden");
+      Pad.clear();
 
-        const action = document.createElement('div');
-        action.className = isAdminParticipant ? '' : 'grid2';
+      const view = await API.get(`/api/cashflow/requests/${encodeURIComponent(id)}`);
+      const req = view.request;
+      const participants = view.participants || [];
 
-        // sign block
-        const signCard = document.createElement('div');
-        signCard.className='item';
-        signCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Подписать</div>`;
-        const pad = makeCanvasPad();
-        signCard.appendChild(pad.wrap);
-        const btnSign = document.createElement('button');
-        btnSign.className='btn ok';
-        btnSign.textContent = 'Подтвердить подпись';
-        btnSign.style.marginTop='10px';
-        signCard.appendChild(btnSign);
-        btnSign.addEventListener('click', async ()=>{
-          try{
-            btnSign.disabled = true;
-            await API.post(`/api/cashflow/requests/${id}/sign`, {signature: pad.dataUrl()});
-            showOk('Подпись отправлена');
-            await openDetail(id);
-            await loadList();
-          }catch(e){ showErr(e); }
-          finally{ btnSign.disabled=false; }
-        });
+      $("detailTitle").textContent = `${fmtOp(req.op_type)} • ${fmtAccount(req.account)}`;
+      $("detailSub").textContent = `${fmtMoney(req.amount)} ₽ • ${fmtDateTime(req.created_at)} • ${String(req.status||"").replaceAll("_"," ")}`;
 
-
-        action.appendChild(signCard);
-
-        if (!isAdminParticipant) {
-          // refuse block
-          const refCard = document.createElement('div');
-          refCard.className='item';
-          refCard.innerHTML = `<div style="font-weight:800; margin-bottom:8px; color: var(--danger);">Отказать</div>`;
-          const ta = document.createElement('textarea');
-          ta.rows = 5;
-          ta.placeholder = 'Укажите причину отказа…';
-          refCard.appendChild(ta);
-          const btnRef = document.createElement('button');
-          btnRef.className='btn danger';
-          btnRef.textContent='Отправить отказ';
-          btnRef.style.marginTop='10px';
-          refCard.appendChild(btnRef);
-          btnRef.addEventListener('click', async ()=>{
-            try{
-              const reason = (ta.value||'').trim();
-              if (!reason) { showErr(new Error('Причина отказа обязательна')); return; }
-              btnRef.disabled = true;
-              await API.post(`/api/cashflow/requests/${id}/refuse`, {reason});
-              showOk('Отказ отправлен');
-              await openDetail(id);
-              await loadList();
-            }catch(e){ showErr(e); }
-            finally{ btnRef.disabled=false; }
-          });
-
-          action.appendChild(refCard);
-        }
-        wrap.appendChild(action);
-
-        UI.detail.innerHTML='';
-        UI.detail.appendChild(wrap);
+      // check my state
+      const myId = State.me ? Number(State.me.telegram_id) : null;
+      const mePart = participants.find(p=> Number(p.telegram_id) === myId);
+      const myState = mePart ? (mePart.state || mePart.status || "") : "";
+      const already = String(myState||"").toUpperCase().includes("SIGNED") || String(myState||"").toUpperCase().includes("REFUSED");
+      if (already){
+        $("sigBlock").classList.add("hidden");
+        $("finalBlock").classList.remove("hidden");
       }
 
-      async function loadAct(){
-        UI.actErr.style.display='none';
-        UI.actBody.innerHTML = '<tr><td colspan="5" class="muted">Загрузка…</td></tr>';
-        const account = UI.actAccountSel.value || '';
-        const q = new URLSearchParams();
-        if (account) q.set('account', account);
-        try{
-          const data = await API.get(`/api/cashflow/withdraw-act?${q.toString()}`);
-          const items = data.items || [];
-          if (!items.length){
-            UI.actBody.innerHTML = '<tr><td colspan="5" class="muted">Нет данных.</td></tr>';
-            return;
-          }
-          UI.actBody.innerHTML = '';
-          for (const r of items){
-            const sig = (r.signature_value || '').startsWith('ОТКАЗ') ? r.signature_value : (r.signature_path ? 'Подпись' : r.signature_value || '');
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-              <td>${r.date||''}</td>
-              <td>${Number(r.amount||0).toFixed(2)}</td>
-              <td>${r.fio||''}</td>
-              <td>${r.user_type||''}</td>
-              <td>${sig}</td>
-            `;
-            UI.actBody.appendChild(tr);
-          }
-        }catch(e){
-          UI.actErr.style.display='block';
-          UI.actErr.textContent = e.message || String(e);
-          UI.actBody.innerHTML = '<tr><td colspan="5" class="muted">Недоступно.</td></tr>';
-        }
+      let infoHtml = `
+        <div><b>Запрос #${req.id}</b></div>
+        <div class="sp8"></div>
+        <div class="muted small">Участники:</div>
+        <div class="sp8"></div>
+      `;
+      for (const p of participants){
+        const state = (p.state || p.status || "").replaceAll("_"," ");
+        infoHtml += `<div class="muted small">• ${p.name_snapshot || "—"} — ${state}</div>`;
       }
+      $("detailInfo").innerHTML = infoHtml;
+    }
 
-      // -------- Tabs
-      function setTab(which){
-        const req = which === 'requests';
-        UI.tabRequests.classList.toggle('active', req);
-        UI.tabAct.classList.toggle('active', !req);
-        UI.panelRequests.style.display = req ? 'block' : 'none';
-        UI.panelAct.style.display = req ? 'none' : 'block';
+    async function signCurrent(){
+      const id = State.currentId;
+      if (!id) return;
+      const sig = Pad.dataUrl();
+      await API.post(`/api/cashflow/requests/${encodeURIComponent(id)}/sign`, { signature_data_url: sig });
+      toast("Подписано");
+      showDetail(false);
+      await loadList();
+    }
+
+    async function refuseCurrent(){
+      const id = State.currentId;
+      if (!id) return;
+      const reason = ($("refuseReason").value || "").trim();
+      if (!reason){
+        toast("Укажите причину отказа");
+        return;
       }
+      await API.post(`/api/cashflow/requests/${encodeURIComponent(id)}/refuse`, { reason });
+      toast("Отказ отправлен");
+      showDetail(false);
+      await loadList();
+    }
 
-      UI.tabRequests.addEventListener('click', ()=>{ setTab('requests'); });
-      UI.tabAct.addEventListener('click', async ()=>{ setTab('act'); await loadAct(); });
-      UI.btnReload.addEventListener('click', ()=> loadList().catch(showErr));
-      UI.btnActReload.addEventListener('click', ()=> loadAct().catch(showErr));
+    /**********************
+     * Auth + init
+     **********************/
+    async function authTelegram(){
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (!tg){
+        $("statusLine").textContent = "Откройте через Telegram";
+        return;
+      }
+      try{
+        tg.expand && tg.expand();
+      }catch{}
+      const initData = tg.initData || "";
+      if (!initData){
+        $("statusLine").textContent = "Нет initData";
+        return;
+      }
+      await API.post("/api/auth/telegram", { init_data: initData });
+    }
 
-      // -------- Boot
-      (async ()=>{
-        try{
-          await API.ensure();
-          UI.subtitle.textContent = 'Готово';
-          UI.mePill.textContent = `${API.user?.name || ''} • ${API.user?.role || ''}`;
-          const rid = qs('rid');
-          await loadList();
-          if (rid) await openDetail(rid);
-        }catch(e){
-          UI.subtitle.textContent = 'Ошибка';
-          showErr(e);
-        }
-      })();
-    </script>
-  </body>
+    async function loadMe(){
+      const me = await API.get("/api/me");
+      State.me = me;
+      $("statusLine").textContent = "Готово";
+      $("roleChip").textContent = `${me.name || "Пользователь"} • ${me.role || "—"}`;
+      $("roleChip").classList.remove("hidden");
+    }
+
+    // bind
+    $("tabRequests").addEventListener("click", ()=> setTab("requests"));
+    $("tabHistory").addEventListener("click", ()=> setTab("history"));
+
+    $("detailClose").addEventListener("click", ()=> showDetail(false));
+    $("detailBackdrop").addEventListener("click", (e)=>{ if (e.target === $("detailBackdrop")) showDetail(false); });
+
+    $("sigClear").addEventListener("click", ()=> Pad.clear());
+    $("sigSend").addEventListener("click", ()=> signCurrent().catch(e=> toast(String(e.message||e))));
+    $("refuseBtn").addEventListener("click", ()=> refuseCurrent().catch(e=> toast(String(e.message||e))));
+
+    $("refreshBtn").addEventListener("click", ()=> loadList().then(()=>toast("Обновлено")).catch(e=> toast(String(e.message||e))));
+
+    $("themeBtn").addEventListener("click", ()=>{
+      const cur = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+      applyTheme(cur === "dark" ? "light" : "dark");
+    });
+
+    (async function init(){
+      initTheme();
+      Pad.init();
+
+      State.dropdowns.account = makeDropdown("accountSel", "accountLabel");
+      State.dropdowns.scope = makeDropdown("scopeSel", "scopeLabel");
+
+      try{
+        await authTelegram();
+        await loadMe();
+        await loadList();
+      }catch(e){
+        $("statusLine").textContent = "Ошибка";
+        toast(String(e.message||e));
+      }
+    })();
+  </script>
+</body>
 </html>

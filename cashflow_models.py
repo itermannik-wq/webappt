@@ -668,10 +668,15 @@ def list_withdraw_act_rows(
     date_to: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Возвращает строки акта изъятия (развёртка по участникам)."""
-    where: List[str] = ["r.op_type='withdraw'", "r.status='FINAL'"]
+    where: List[str] = [
+        # В интерфейсе "Акт изъятия" ожидают видеть все операции наличных
+        # (и сбор, и изъятие), поэтому берём оба типа.
+        "r.op_type IN ('withdraw','collect')",
+        "r.status IN ('PENDING_SIGNERS','PENDING_ADMIN','FINAL')",
+    ]
     params: List[Any] = []
     if account:
-        where.append("r.account=?")
+        where.append("LOWER(r.account)=?")
         params.append(_normalize_account(account))
     if date_from:
         where.append("r.created_at>=?")
@@ -686,6 +691,7 @@ def list_withdraw_act_rows(
     SELECT
       r.id AS request_id,
       r.account AS account,
+      r.op_type AS op_type,
       r.created_at AS date,
       r.amount AS amount,
       p.name_snapshot AS fio,
@@ -711,28 +717,29 @@ def list_withdraw_act_rows(
         decision = row["decision2"] or row["decision1"]
         refuse = row["refuse2"] or row["refuse1"]
         sig = row["sig2"] or row["sig1"]
-        # Для акта: если decision REFUSED на attempt2 -> ОТКАЗ
+
         if row["decision2"] == "REFUSED":
             sign_value = "ОТКАЗ" + (f": {refuse}" if refuse else "")
         elif decision == "SIGNED":
             sign_value = "SIGNED"  # UI/Excel решит: картинка или текст
         elif decision == "REFUSED":
-            # теоретически: отказ только на attempt1 не должен попадать в FINAL, но на всякий случай
             sign_value = "ОТКАЗ" + (f": {refuse}" if refuse else "")
         else:
-            sign_value = ""  # не должно быть
+            sign_value = "Ожидает подписи"
 
         out.append(
             {
                 "request_id": int(row["request_id"]),
                 "account": row["account"],
+                "op_type": row["op_type"],
                 "date": row["date"],
                 "amount": float(row["amount"]),
-                "fio": row["fio"],
-                "user_type": row["user_type"],
+                "fio": row["fio"] or "—",
+                "user_type": row["user_type"] or "—",
                 "signature_value": sign_value,
                 "signature_path": sig,
                 "is_admin": bool(int(row["is_admin"]) == 1),
             }
         )
     return out
+
