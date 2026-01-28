@@ -1902,6 +1902,106 @@
       .ring{ width: 90px; height: 90px; }
       .ringInner{ width: 70px; height: 70px; }
     }
+    /* --- FIX: фон всегда на весь экран --- */
+    html, body{
+      min-height: 100svh;
+      background: var(--bg) !important;
+    }
+    body::before{
+      content:"";
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: -10;
+    }
+
+    /* --- Cashflow Act table: без нахлестов --- */
+    .cashflowActTable{
+      width: 100%;
+    }
+    .cashflowActTable th,
+    .cashflowActTable td{
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      vertical-align: top;
+    }
+
+    /* PNG подпись */
+    .sigImg{
+      width: 160px;
+      max-width: 100%;
+      height: 52px;
+      object-fit: contain;
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid var(--stroke);
+      display: block;
+    }
+
+    /* бейджи для статусов подписи */
+    .badge.danger{
+      background: rgba(239,68,68,.12);
+      border: 1px solid rgba(239,68,68,.25);
+      color: rgba(239,68,68,.95);
+    }
+
+    /* На телефоне превращаем строки таблицы в "карточки" */
+    /* На телефоне превращаем строки таблицы в "карточки" */
+    @media (max-width: 520px){
+      .cashflowActTable thead{ display:none; }
+
+      /* ВАЖНО: убираем min-width, иначе значения уходят за экран */
+      .cashflowActTable{
+        min-width: 0 !important;
+        width: 100% !important;
+        table-layout: auto !important;
+        border-collapse: separate;
+        border-spacing: 0 10px;
+      }
+
+      .cashflowActTable tr{
+        display:block;
+        width: 100%;
+        background: var(--card);
+        border: 1px solid var(--stroke);
+        border-radius: 16px;
+        padding: 10px 12px;
+      }
+
+      .cashflowActTable td{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap: 12px;
+        border: 0 !important;
+        padding: 6px 0 !important;
+        width: 100%;
+      }
+
+      .cashflowActTable td::before{
+        content: attr(data-label);
+        flex: 0 0 44%;
+        color: var(--muted2);
+        font-size: 11px;
+        line-height: 1.2;
+      }
+
+      .cashflowActTable td .cfVal{
+        flex: 1;
+        text-align: right;
+        color: var(--text);
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .cashflowActTable td .cfVal img,
+      .cashflowActTable td .cfVal .badge{
+        margin-left: auto;
+      }
+    }
+
+
   </style>
 </head>
 
@@ -3417,6 +3517,29 @@
     /**********************
      * API layer
      **********************/
+
+    function currentTelegramId(){
+      try{
+        const tg = window.Telegram && window.Telegram.WebApp;
+        const tid = tg?.initDataUnsafe?.user?.id;
+        const n = Number(tid || 0);
+        return n || null;
+      }catch{ return null; }
+    }
+
+    function sessionTelegramId(token){
+      try{
+        const body = (token || "").split(".")[0];
+        if (!body) return null;
+        let b64 = body.replace(/-/g, "+").replace(/_/g, "/");
+        b64 += "=".repeat((4 - (b64.length % 4)) % 4);
+        const payload = JSON.parse(atob(b64));
+        const tid = Number(payload.telegram_id || 0);
+        return tid || null;
+      }catch{ return null; }
+    }
+
+
     const API = {
       token: null,
       user: null,
@@ -3441,14 +3564,33 @@
         return data;
       },
       async ensureAuth(){
+        const tgId = currentTelegramId();
+
         if (!API.token) {
           API.token = localStorage.getItem("sessionToken");
           try { API.user = JSON.parse(localStorage.getItem("sessionUser")||"null"); } catch { API.user=null; }
         }
+
+        // если token/user в localStorage от другого Telegram-аккаунта — сбрасываем
+        if (API.token && tgId){
+          const tokenTid = sessionTelegramId(API.token);
+          const userTid = API.user?.telegram_id ? Number(API.user.telegram_id) : null;
+
+          if ((tokenTid && tokenTid !== tgId) || (userTid && userTid !== tgId)){
+            API.token = null;
+            API.user = null;
+            localStorage.removeItem("sessionToken");
+            localStorage.removeItem("sessionUser");
+          }
+        }
+
         if (!API.token) return API.auth();
-        // cheap /api/me check
+
         try{
-          await API.get("/api/me");
+          const me = await API.get("/api/me");
+          if (tgId && Number(me.telegram_id || 0) && Number(me.telegram_id) !== tgId){
+            throw new Error("Telegram account changed");
+          }
         }catch(e){
           return API.auth();
         }
@@ -7032,34 +7174,108 @@
       const account = $("#cashflowActAccount")?.value || "main";
       const q = new URLSearchParams();
       if (account) q.set("account", account);
+
       const data = await API.get(`/api/cashflow/withdraw-act?${q.toString()}`);
       const body = $("#cashflowActBody");
       if (!body) return;
+
       const items = data.items || [];
       body.innerHTML = "";
+
       if (!items.length){
         body.innerHTML = `<tr><td colspan="6" class="muted2">Нет данных.</td></tr>`;
         return;
       }
+
       items.forEach((r)=>{
-        const sig = (r.signature_value || "").startsWith("ОТКАЗ")
-          ? r.signature_value
-          : (r.signature_path ? "Подпись" : (r.signature_value || ""));
-        const date = r.date || r.created_at || "";
-        const fio = r.fio || r.name_snapshot || "";
-        const userType = r.user_type || r.role_snapshot || "";
-        const op = fmtCashflowOp(r.op_type || "");
         const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${escapeHtml(date)}</td>
-          <td>${escapeHtml(op)}</td>
-          <td>${Number(r.amount || 0).toFixed(2)}</td>
-          <td>${escapeHtml(fio)}</td>
-          <td>${escapeHtml(userType)}</td>
-          <td>${escapeHtml(sig)}</td>
-        `;
+
+        const tdDate = document.createElement("td");
+        tdDate.dataset.label = "Дата";
+        tdDate.textContent = fmtDateOnly(r.date || r.created_at || "");
+        tr.appendChild(tdDate);
+
+        const tdOp = document.createElement("td");
+        tdOp.dataset.label = "Операция";
+        tdOp.textContent = fmtCashflowOp(r.op_type || "");
+        tr.appendChild(tdOp);
+
+        const tdAmt = document.createElement("td");
+        tdAmt.dataset.label = "Сумма";
+        const amt = Number(r.amount || 0);
+        tdAmt.textContent = amt.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        tdAmt.classList.add("mono");
+        tr.appendChild(tdAmt);
+
+        const tdFio = document.createElement("td");
+        tdFio.dataset.label = "ФИО";
+        tdFio.textContent = r.fio || r.name_snapshot || "";
+        tr.appendChild(tdFio);
+
+        const tdType = document.createElement("td");
+        tdType.dataset.label = "Тип пользователя";
+        tdType.textContent = r.user_type || r.role_snapshot || "";
+        tr.appendChild(tdType);
+
+        const tdSig = document.createElement("td");
+        tdSig.dataset.label = "Подпись";
+        const sigVal = String(r.signature_value || "");
+
+        if (sigVal.startsWith("ОТКАЗ")){
+          tdSig.appendChild(makeBadge(sigVal, "danger"));
+        } else if (r.signature_path && r.request_id && r.participant_telegram_id){
+          const img = document.createElement("img");
+          img.className = "sigImg";
+          img.alt = "Подпись";
+          tdSig.appendChild(img);
+
+          ensureSignatureImg(img, r.request_id, r.participant_telegram_id).catch(()=>{
+            tdSig.innerHTML = "";
+            tdSig.appendChild(makeBadge(sigVal || "Подписано"));
+          });
+        } else {
+          tdSig.appendChild(makeBadge(sigVal || "Ожидает подписи"));
+        }
+
+        tr.appendChild(tdSig);
         body.appendChild(tr);
       });
+    }
+
+
+    // --- подписи: кэш objectURL, чтобы не дёргать сеть повторно ---
+    const CASH_SIG_CACHE = new Map(); // key -> objectURL
+
+    function fmtDateOnly(v){
+      if (!v) return "—";
+      const s = String(v);
+      try{
+        const d = new Date(s);
+        if (!Number.isNaN(d.getTime())){
+          return d.toLocaleDateString("ru-RU", { year:"numeric", month:"2-digit", day:"2-digit" });
+        }
+      }catch(e){}
+      return s.split("T")[0];
+    }
+
+    function makeBadge(text, variant){
+      const span = document.createElement("span");
+      span.className = variant ? `badge ${variant}` : "badge";
+      span.textContent = text || "—";
+      return span;
+    }
+
+    // Нужен метод API.getBlob (см. ниже)
+    async function ensureSignatureImg(imgEl, requestId, participantTelegramId){
+      const key = `${requestId}:${participantTelegramId}`;
+      if (CASH_SIG_CACHE.has(key)){
+        imgEl.src = CASH_SIG_CACHE.get(key);
+        return;
+      }
+      const blob = await API.getBlob(`/api/cashflow/requests/${requestId}/participants/${participantTelegramId}/signature.png`);
+      const url = URL.createObjectURL(blob);
+      CASH_SIG_CACHE.set(key, url);
+      imgEl.src = url;
     }
 
 

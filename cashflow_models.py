@@ -667,79 +667,179 @@ def list_withdraw_act_rows(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Возвращает строки акта изъятия (развёртка по участникам)."""
-    where: List[str] = [
-        # В интерфейсе "Акт изъятия" ожидают видеть все операции наличных
-        # (и сбор, и изъятие), поэтому берём оба типа.
-        "r.op_type IN ('withdraw','collect')",
-        "r.status IN ('PENDING_SIGNERS','PENDING_ADMIN','FINAL')",
-    ]
-    params: List[Any] = []
-    if account:
-        where.append("LOWER(r.account)=?")
-        params.append(_normalize_account(account))
-    if date_from:
-        where.append("r.created_at>=?")
-        params.append(str(date_from))
-    if date_to:
-        where.append("r.created_at<=?")
-        params.append(str(date_to))
-    w = " AND ".join(where)
+    """Возвращает строки акта изъятия/сбора наличных (по участникам) + статус подписи.
 
-    # Берём финальные подписи: attempt=2 если есть, иначе attempt=1.
-    sql = f"""
-    SELECT
-      r.id AS request_id,
-      r.account AS account,
-      r.op_type AS op_type,
-      r.created_at AS date,
-      r.amount AS amount,
-      p.name_snapshot AS fio,
-      p.role_snapshot AS user_type,
-      p.is_admin AS is_admin,
-      s2.decision AS decision2,
-      s2.refuse_reason AS refuse2,
-      s2.signature_path AS sig2,
-      s1.decision AS decision1,
-      s1.refuse_reason AS refuse1,
-      s1.signature_path AS sig1
-    FROM cash_requests r
-    JOIN cash_request_participants p ON p.request_id=r.id
-    LEFT JOIN cash_signatures s1 ON s1.request_id=r.id AND s1.telegram_id=p.telegram_id AND s1.attempt=1
-    LEFT JOIN cash_signatures s2 ON s2.request_id=r.id AND s2.telegram_id=p.telegram_id AND s2.attempt=2
-    WHERE {w}
-    ORDER BY r.id DESC, p.is_admin ASC, p.id ASC;
+    signature_value:
+      - "SIGNED" -> есть подпись (signature_path может быть None, если файл потерян)
+      - "ОТКАЗ: причина"
+      - "Ожидает подписи"
+    signature_path:
+      - относительный путь PNG (attempt=2 если есть, иначе attempt=1)
+    participant_telegram_id:
+      - telegram_id участника (нужно для загрузки PNG подписи через API)
+
+    ВАЖНО:
+      - date возвращаем ТОЛЬКО дату YYYY-MM-DD (без времени)
+      - amount возвращаем числом, округлённым до 2 знаков
     """
 
-    rows = _fetchall(conn, sql, params)
+    def _to_iso_lower_bound(v: str) -> str:
+        """YYYY-MM-DD -> YYYY-MM-DDT00:00:00Z, ISO оставляем как есть (подправляем Z при необходимости)."""
+        s = (v or "").strip()
+        if not s:
+            return s
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+            return f"{s}T00:00:00Z"
+        # если вдруг без Z, но ISO — оставим как есть
+        return s
+
+    def _to_iso_upper_bound(v: str) -> str:
+        """YYYY-MM-DD -> YYYY-MM-DDT23:59:59Z, ISO оставляем как есть."""
+        s = (v or "").strip()
+        if not s:
+            return s
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+            return f"{s}T23:59:59Z"
+        return s
+
+    def _date_only(created_at: Any) -> str:
+        """Из created_at (ISO) делаем YYYY-MM-DD."""
+        raw = str(created_at or "").strip()
+        if not raw:
+            return ""
+        # быстрый путь
+        if len(raw) >= 10:
+            d10 = raw[:10]
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d10):
+                return d10
+        # попытка распарсить
+        try:
+            s = raw.replace("Z", "+00:00")
+            return dt.datetime.fromisoformat(s).date().isoformat()
+        except Exception:
+            return raw[:10] if len(raw) >= 10 else raw
+
+    params: List[Any] = []
+    where = "WHERE 1=1 "
+
+    if account:
+        where += " AND r.account = ?"
+        params.append(_normalize_account(account))
+
+    if date_from:
+        where += " AND r.created_at >= ?"
+        params.append(_to_iso_lower_bound(str(date_from)))
+
+    if date_to:
+        where += " AND r.created_at <= ?"
+        params.append(_to_iso_upper_bound(str(date_to)))
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            r.id AS request_id,
+            r.account,
+            r.op_type,
+            r.amount,
+            r.created_at,
+            p.telegram_id AS participant_telegram_id,
+            p.name_snapshot,
+            p.role_snapshot,
+            p.is_admin,
+            s1.decision AS sig1_decision,
+            s1.refuse_reason AS sig1_reason,
+            s1.signature_path AS sig1_path,
+            s2.decision AS sig2_decision,
+            s2.refuse_reason AS sig2_reason,
+            s2.signature_path AS sig2_path
+        FROM cash_requests r
+        JOIN cash_request_participants p ON p.request_id = r.id
+        LEFT JOIN cash_signatures s1
+          ON s1.request_id = r.id AND s1.telegram_id = p.telegram_id AND s1.attempt = 1
+        LEFT JOIN cash_signatures s2
+          ON s2.request_id = r.id AND s2.telegram_id = p.telegram_id AND s2.attempt = 2
+        {where}
+        ORDER BY r.created_at DESC, r.id DESC, p.is_admin ASC, p.id ASC
+        """,
+        params,
+    ).fetchall()
+
     out: List[Dict[str, Any]] = []
     for row in rows:
-        decision = row["decision2"] or row["decision1"]
-        refuse = row["refuse2"] or row["refuse1"]
-        sig = row["sig2"] or row["sig1"]
+        # attempt=2 важнее, если есть
+        sig_dec = row["sig2_decision"] or row["sig1_decision"]
+        sig_reason = row["sig2_reason"] or row["sig1_reason"]
+        sig_path = row["sig2_path"] or row["sig1_path"]
 
-        if row["decision2"] == "REFUSED":
-            sign_value = "ОТКАЗ" + (f": {refuse}" if refuse else "")
-        elif decision == "SIGNED":
-            sign_value = "SIGNED"  # UI/Excel решит: картинка или текст
-        elif decision == "REFUSED":
-            sign_value = "ОТКАЗ" + (f": {refuse}" if refuse else "")
+        if sig_dec == "REFUSED":
+            signature_value = f"ОТКАЗ: {sig_reason or 'без причины'}"
+        elif sig_dec == "SIGNED":
+            signature_value = "SIGNED"
         else:
-            sign_value = "Ожидает подписи"
+            signature_value = "Ожидает подписи"
+
+        amount_val = round(float(row["amount"] or 0), 2)
 
         out.append(
             {
                 "request_id": int(row["request_id"]),
+                "participant_telegram_id": int(row["participant_telegram_id"]),
                 "account": row["account"],
                 "op_type": row["op_type"],
-                "date": row["date"],
-                "amount": float(row["amount"]),
-                "fio": row["fio"] or "—",
-                "user_type": row["user_type"] or "—",
-                "signature_value": sign_value,
-                "signature_path": sig,
-                "is_admin": bool(int(row["is_admin"]) == 1),
+                "amount": amount_val,                 # число, округлено до 2 знаков
+                "date": _date_only(row["created_at"]),# ТОЛЬКО YYYY-MM-DD
+                "fio": row["name_snapshot"],
+                "user_type": row["role_snapshot"],
+                "signature_value": signature_value,
+                "signature_path": sig_path,
             }
         )
     return out
 
+
+def normalize_signature_png_bytes(png_bytes: bytes) -> bytes:
+    """
+    Нормализует PNG подписи для вставки в Excel:
+    - убирает прозрачные поля (crop по альфе)
+    - добавляет небольшой padding
+    - композитит на белый фон (Excel иногда капризничает с прозрачностью)
+    Если Pillow недоступен/PNG битый — возвращает исходные bytes.
+    """
+    try:
+        import io as _io
+        from PIL import Image  # pip install pillow
+    except Exception:
+        return png_bytes
+
+    try:
+        im = Image.open(_io.BytesIO(png_bytes))
+        im.load()
+    except Exception:
+        return png_bytes
+
+    try:
+        if im.mode != "RGBA":
+            im = im.convert("RGBA")
+
+        # crop по альфе (убираем пустые поля)
+        alpha = im.split()[-1]
+        bbox = alpha.getbbox()
+        if bbox:
+            im = im.crop(bbox)
+
+        # padding
+        pad = 8
+        w, h = im.size
+        canvas = Image.new("RGBA", (w + pad * 2, h + pad * 2), (255, 255, 255, 0))
+        canvas.paste(im, (pad, pad), im)
+        im = canvas
+
+        # композит на белый фон (RGB)
+        bg = Image.new("RGB", im.size, (255, 255, 255))
+        bg.paste(im, mask=im.split()[-1])
+
+        out = _io.BytesIO()
+        bg.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+    except Exception:
+        return png_bytes

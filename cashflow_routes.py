@@ -31,6 +31,10 @@ from pydantic import BaseModel, Field
 import cashflow_models as m
 import cashflow_bot as b
 
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+import datetime as dt
 
 router = APIRouter()
 
@@ -428,31 +432,44 @@ def get_signature_png(
     _ensure_cashflow_tables()
     cfg = _cash_cfg()
     db_connect = _app_db_connect()
+
     with db_connect() as conn:
         view = m.build_request_view(conn, int(request_id))
-        # доступ: админ или участник
-        if str(u["role"]) != "admin":
-            tid = int(u["telegram_id"])
-            if not any(int(p["telegram_id"]) == tid for p in view["participants"]):
-                raise HTTPException(status_code=403, detail="Not a participant")
 
-        target = None
+        role = str(u["role"])
+        caller_tid = int(u["telegram_id"])
+
+        # доступ: админ ИЛИ тот, у кого есть доступ к акту ИЛИ участник заявки
+        if role != "admin":
+            can_view_act = False
+            try:
+                can_view_act = _user_can_view_withdraw_act(caller_tid, role)
+            except Exception:
+                can_view_act = False
+
+            if not can_view_act:
+                if not any(int(p["telegram_id"]) == caller_tid for p in view["participants"]):
+                    raise HTTPException(status_code=403, detail="Not allowed")
+
+        # находим нужного участника
+        part = None
         for p in view["participants"]:
             if int(p["telegram_id"]) == int(telegram_id):
-                target = p
+                part = p
                 break
-        if not target:
+        if not part:
             raise HTTPException(status_code=404, detail="Participant not found")
 
-        sig2 = target.get("attempt2")
-        sig1 = target.get("attempt1")
-        sig = sig2 or sig1
-        if not sig or sig.get("decision") != "SIGNED" or not sig.get("signature_path"):
+        # attempt=2 если есть, иначе attempt=1
+        sig = part.get("attempt2") or part.get("attempt1") or None
+        if not sig or str(sig.get("decision")) != "SIGNED" or not sig.get("signature_path"):
             raise HTTPException(status_code=404, detail="Signature not found")
-        path = m.get_signature_file_path(cfg, str(sig["signature_path"]))
-        if not path.exists():
+
+        img_path = m.get_signature_file_path(cfg, str(sig["signature_path"]))
+        if not img_path.exists():
             raise HTTPException(status_code=404, detail="Signature file missing")
-        return FileResponse(str(path), media_type="image/png")
+
+        return FileResponse(str(img_path), media_type="image/png")
 
 
 # ---------------------------
@@ -498,16 +515,7 @@ def withdraw_act_xlsx(
     date_to: Optional[str] = Query(None),
     u=Depends(_app_require_role("admin", "accountant")),
 ):
-    """Экспорт акта наличных (сбор/изъятие) в Excel.
-
-    Формат: одна книга, 3 листа (MAIN/PRAISE/ALPHA), на каждом 6 колонок:
-    Дата, Операция, Сумма, ФИО, Тип пользователя, Подпись.
-
-    В колонке "Подпись":
-      - если подписано и есть signature_path -> вставляем PNG подпись (ту, что рисовали)
-      - если отказ -> текст "ОТКАЗ: причина"
-      - если ожидает -> "Ожидает подписи"
-    """
+    """Экспорт акта наличных (сбор/изъятие) в Excel с PNG подписями."""
     _ensure_cashflow_tables()
     cfg = _cash_cfg()
     db_connect = _app_db_connect()
@@ -530,57 +538,106 @@ def withdraw_act_xlsx(
         ws.append(["Дата", "Операция", "Сумма", "ФИО", "Тип пользователя", "Подпись"])
         ws.freeze_panes = "A2"
 
-        ws.column_dimensions["A"].width = 22
+        ws.column_dimensions["A"].width = 14
         ws.column_dimensions["B"].width = 18
         ws.column_dimensions["C"].width = 16
         ws.column_dimensions["D"].width = 32
         ws.column_dimensions["E"].width = 18
-        ws.column_dimensions["F"].width = 28  # подпись
+        ws.column_dimensions["F"].width = 34  # подпись
+
+        # стили
+        thin = Side(style="thin", color="D0D0D0")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        header_fill = PatternFill("solid", fgColor="F3F4F6")
+        header_font = Font(bold=True)
+        center = Alignment(vertical="center", horizontal="center", wrap_text=True)
+        left = Alignment(vertical="center", horizontal="left", wrap_text=True)
+
+        # header style
+        for col in range(1, 7):
+            c = ws.cell(row=1, column=col)
+            c.fill = header_fill
+            c.font = header_font
+            c.alignment = center
+            c.border = border
 
         rnum = 2
         for r in rows_all:
-            if r["account"] != account_code:
+            if r.get("account") != account_code:
                 continue
 
-            ws.cell(row=rnum, column=1, value=r.get("date"))
+            # --- ДАТА: только дата ---
+            date_cell = ws.cell(row=rnum, column=1)
+            raw_date = r.get("date")  # ожидаем YYYY-MM-DD
+            if raw_date:
+                s = str(raw_date)[:10]
+                try:
+                    date_cell.value = dt.date.fromisoformat(s)
+                except Exception:
+                    date_cell.value = s
+            else:
+                date_cell.value = ""
+            date_cell.number_format = "DD.MM.YYYY"
+            date_cell.alignment = center
+            date_cell.border = border
 
+            # --- ОПЕРАЦИЯ ---
             op = str(r.get("op_type") or "")
             op_disp = {"collect": "Сбор наличных", "withdraw": "Изъятие наличных"}.get(op, op)
-            ws.cell(row=rnum, column=2, value=op_disp)
+            c2 = ws.cell(row=rnum, column=2, value=op_disp)
+            c2.alignment = left
+            c2.border = border
 
-            ws.cell(row=rnum, column=3, value=float(r.get("amount") or 0))
-            ws.cell(row=rnum, column=4, value=r.get("fio"))
-            ws.cell(row=rnum, column=5, value=r.get("user_type"))
+            # --- СУММА: всегда .00 ---
+            amt = float(r.get("amount") or 0)
+            c3 = ws.cell(row=rnum, column=3, value=amt)
+            c3.number_format = "#,##0.00"
+            c3.alignment = center
+            c3.border = border
 
+            # --- ФИО / ТИП ---
+            c4 = ws.cell(row=rnum, column=4, value=r.get("fio"))
+            c4.alignment = left
+            c4.border = border
+
+            c5 = ws.cell(row=rnum, column=5, value=r.get("user_type"))
+            c5.alignment = center
+            c5.border = border
+
+            # --- ПОДПИСЬ ---
             sig_cell = ws.cell(row=rnum, column=6)
+
             signature_value = r.get("signature_value") or "—"
             signature_path = r.get("signature_path")
 
-            # делаем строку повыше (чтобы подпись нормально влезала)
-            ws.row_dimensions[rnum].height = 52
+            # место под картинку
+            ws.row_dimensions[rnum].height = 60
 
-            # 1) отказ -> всегда текст
+            # отказ -> текст
             if str(signature_value).startswith("ОТКАЗ"):
                 sig_cell.value = signature_value
 
-            # 2) подписано -> пытаемся вставить картинку
+            # подписано -> вставляем PNG (ЖИВАЯ подпись)
             elif signature_path:
                 try:
                     img_path = m.get_signature_file_path(cfg, str(signature_path))
                     if img_path.exists():
-                        img = XLImage(str(img_path))
+                        raw = img_path.read_bytes()
+                        raw = m.normalize_signature_png_bytes(raw)
+
+                        img = XLImage(io.BytesIO(raw))
                         img.width = 180
                         img.height = 60
-                        anchor = f"{get_column_letter(6)}{rnum}"
-                        sig_cell.value = ""  # чтобы в ячейке не было "SIGNED"
-                        ws.add_image(img, anchor)
-                    else:
-                        # файл подписи не найден -> хотя бы корректный текст
-                        sig_cell.value = signature_value
-                except Exception:
-                    sig_cell.value = signature_value
 
-            # 3) нет подписи -> показываем правильный статус (например "Ожидает подписи")
+                        anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
+                        sig_cell.value = ""  # чтобы в ячейке не было текста
+                        ws.add_image(img, anchor)  # <-- ВАЖНО: именно это встраивает подпись в XLSX
+                    else:
+                        sig_cell.value = f"{signature_value} (PNG не найден)"
+                except Exception as e:
+                    sig_cell.value = f"{signature_value} (ошибка PNG: {e})"
+
+            # нет подписи -> что есть (например "—")
             else:
                 sig_cell.value = signature_value
 

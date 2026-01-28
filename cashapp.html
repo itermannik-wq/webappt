@@ -3,8 +3,17 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="color-scheme" content="light dark" />
   <title>Подтверждение наличных</title>
+
+  <!-- Telegram WebApp -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Material Symbols (как в основном интерфейсе) -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:wght@300;400;500;600&display=swap" />
+
   <style>
+
     :root{
       --bg:#0b0f14;
       --card:rgba(255,255,255,.06);
@@ -47,7 +56,14 @@
       --tap: rgba(15,23,42,.06);
     }
 
-    *{ box-sizing:border-box; }
+    .material-symbols-rounded{
+      font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+      font-size: 20px;
+      line-height: 1;
+      vertical-align: middle;
+      user-select:none;
+    }
+
     body{
       margin:0;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
@@ -478,8 +494,13 @@
         </div>
       </div>
       <div class="actions">
-        <button id="themeBtn" class="iconBtn" type="button" title="Тема">🌓</button>
-        <button id="refreshBtn" class="iconBtn" type="button" title="Обновить">⟳</button>
+        <button id="themeBtn" class="iconBtn" type="button" title="Тема">
+          <span class="material-symbols-rounded" id="themeIcon">dark_mode</span>
+        </button>
+        <button id="refreshBtn" class="iconBtn" type="button" title="Обновить">
+          <span class="material-symbols-rounded">refresh</span>
+        </button>
+
       </div>
     </div>
 
@@ -580,52 +601,111 @@
 
   <script>
     /**********************
-     * Theme
+     * Telegram + Theme (как в основном WebApp)
      **********************/
+    const tg = window.Telegram?.WebApp;
+    const ThemeState = {
+      mode: "auto", // auto|dark|light
+      media: window.matchMedia?.("(prefers-color-scheme: dark)")
+    };
+
+    const tgThemeParams = tg?.themeParams || {};
+
     function detectTelegramTheme(){
       try{
-        const tg = window.Telegram && window.Telegram.WebApp;
-        const p = tg && tg.themeParams;
-        const bg = p && (p.bg_color || p.secondary_bg_color);
-        if (!bg) return null;
-        // crude brightness check
-        const c = bg.replace('#','');
-        if (c.length !== 6) return null;
-        const r = parseInt(c.slice(0,2),16);
-        const g = parseInt(c.slice(2,4),16);
-        const b = parseInt(c.slice(4,6),16);
-        const lum = (0.2126*r + 0.7152*g + 0.0722*b);
-        return lum < 130 ? "dark" : "light";
+        if (!tgThemeParams.bg_color) return null;
+        const hex = tgThemeParams.bg_color.replace("#","");
+        if (hex.length !== 6) return null;
+        const r = parseInt(hex.slice(0,2),16);
+        const g = parseInt(hex.slice(2,4),16);
+        const b = parseInt(hex.slice(4,6),16);
+        const lum = 0.2126*r + 0.7152*g + 0.0722*b;
+        return (lum > 180) ? "light" : "dark";
       }catch{ return null; }
     }
-    function applyTheme(theme){
-      document.documentElement.dataset.theme = theme;
-      localStorage.setItem("cashapp_theme", theme);
-      // recolor canvas stroke
-      if (Pad.ctx){
-        Pad.ctx.strokeStyle = theme === "dark" ? "#eaf0ff" : "#0f172a";
+
+    function hexToRgba(hex, a){
+      try{
+        const h = String(hex||"").replace("#","");
+        const r = parseInt(h.slice(0,2),16);
+        const g = parseInt(h.slice(2,4),16);
+        const b = parseInt(h.slice(4,6),16);
+        return `rgba(${r},${g},${b},${a})`;
+      }catch{ return ""; }
+    }
+
+    function applyTelegramThemeVars(theme){
+      // применяем параметры Telegram только в тёмной теме (чтобы не ломать светлую)
+      const root = document.documentElement.style;
+      if (theme !== "dark"){
+        root.removeProperty("--bg");
+        root.removeProperty("--card");
+        root.removeProperty("--card2");
+        root.removeProperty("--text");
+        root.removeProperty("--muted");
+        root.removeProperty("--muted2");
+        return;
+      }
+      if (tgThemeParams.bg_color) root.setProperty("--bg", tgThemeParams.bg_color);
+      if (tgThemeParams.secondary_bg_color){
+        root.setProperty("--card", hexToRgba(tgThemeParams.secondary_bg_color, .65));
+        root.setProperty("--card2", hexToRgba(tgThemeParams.secondary_bg_color, .75));
+      }
+      if (tgThemeParams.text_color) root.setProperty("--text", hexToRgba(tgThemeParams.text_color, .92));
+      if (tgThemeParams.hint_color){
+        root.setProperty("--muted", hexToRgba(tgThemeParams.hint_color, .72));
+        root.setProperty("--muted2", hexToRgba(tgThemeParams.hint_color, .5));
       }
     }
+
+    function applyTheme(mode){
+      const normalized = String(mode || "auto").toLowerCase();
+      ThemeState.mode = (normalized === "system") ? "auto" : normalized;
+
+      let theme = ThemeState.mode;
+      if (theme === "auto"){
+        theme = detectTelegramTheme() || (ThemeState.media?.matches ? "dark" : "light");
+      }
+
+      document.documentElement.dataset.theme = theme;
+      applyTelegramThemeVars(theme);
+      localStorage.setItem("cashapp_theme", ThemeState.mode);
+
+      // иконка темы
+      const ic = document.getElementById("themeIcon");
+      if (ic) ic.textContent = (theme === "dark") ? "dark_mode" : "light_mode";
+
+      // цвет пера в подписи
+      if (Pad?.ctx){
+        Pad.ctx.strokeStyle = "#0f172a"; // всегда тёмное перо
+      }
+    }
+
     function initTheme(){
       const saved = localStorage.getItem("cashapp_theme");
-      if (saved === "light" || saved === "dark"){
+      if (saved === "dark" || saved === "light" || saved === "auto"){
         applyTheme(saved);
-        return;
+      } else {
+        applyTheme("auto");
       }
-      const tgTheme = detectTelegramTheme();
-      if (tgTheme){
-        applyTheme(tgTheme);
-        return;
-      }
-      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-      applyTheme(prefersDark ? "dark" : "light");
     }
+
+    // ВАЖНО: готовим Telegram WebApp (без этого часто нет initData/объекта)
+    if (tg){
+      try{ tg.ready(); }catch{}
+      try{ tg.expand(); }catch{}
+    }
+
+    ThemeState.media?.addEventListener?.("change", ()=>{
+      if (ThemeState.mode === "auto") applyTheme("auto");
+    });
+
 
     /**********************
      * API helper
      **********************/
     const API = {
-      baseUrl: "",
+      baseUrl: location.origin,
       token: null,
       setToken(token){
         this.token = token || null;
@@ -639,10 +719,13 @@
       },
       async req(method, path, body){
         const headers = { "Content-Type": "application/json" };
+        let url = this.baseUrl + path;
         if (this.token){
           headers.Authorization = `Bearer ${this.token}`;
+          const sep = url.includes("?") ? "&" : "?";
+          url += `${sep}token=${encodeURIComponent(this.token)}`;
         }
-        const res = await fetch(this.baseUrl + path, {
+        const res = await fetch(url, {
           method,
           headers,
           credentials: "include",
@@ -794,17 +877,32 @@
         const width = Math.min(Math.max(r.width, 260), vw - margin*2);
         let left = Math.min(Math.max(r.left, margin), vw - width - margin);
 
-        // open up if needed
         const spaceBelow = vh - r.bottom - margin;
         const spaceAbove = r.top - margin;
         const wantHeight = Math.min(360, Math.floor(vh * 0.52));
-        const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
 
-        const maxH = Math.min(wantHeight, openUp ? (spaceAbove - 8) : (spaceBelow - 8));
-        panel.style.width = width + "px";
+        // если места мало — показываем панель как "лист" (почти полноэкранно)
+        const minUsable = 180;
+        const preferDown = spaceBelow >= spaceAbove;
+        const dirUp = !preferDown;
+        const available = dirUp ? spaceAbove : spaceBelow;
+
         panel.style.left = left + "px";
-        panel.style.maxHeight = Math.max(160, maxH) + "px";
-        if (openUp){
+        panel.style.width = width + "px";
+
+        if (available < minUsable){
+          panel.style.left = margin + "px";
+          panel.style.width = (vw - margin*2) + "px";
+          panel.style.top = margin + "px";
+          panel.style.bottom = margin + "px";
+          panel.style.maxHeight = (vh - margin*2) + "px";
+          return;
+        }
+
+        const maxH = Math.min(wantHeight, Math.max(80, available - 8));
+        panel.style.maxHeight = maxH + "px";
+
+        if (dirUp){
           panel.style.top = "auto";
           panel.style.bottom = (vh - r.top + 8) + "px";
         } else {
@@ -812,6 +910,7 @@
           panel.style.top = (r.bottom + 8) + "px";
         }
       }
+
 
       function show(){
         if (open) return;
@@ -879,7 +978,7 @@
           this.ctx.setTransform(dpr,0,0,dpr,0,0);
           this.ctx.lineWidth = 2.4;
           this.ctx.lineCap = "round";
-          this.ctx.strokeStyle = document.documentElement.dataset.theme === "dark" ? "#eaf0ff" : "#0f172a";
+          this.ctx.strokeStyle = "#0f172a"; // всегда тёмное перо
         };
 
         const pos = (e)=>{
@@ -1039,7 +1138,7 @@
       const id = State.currentId;
       if (!id) return;
       const sig = Pad.dataUrl();
-      await API.post(`/api/cashflow/requests/${encodeURIComponent(id)}/sign`, { signature_data_url: sig });
+      await API.post(`/api/cashflow/requests/${encodeURIComponent(id)}/sign`, { signature: sig });
       toast("Подписано");
       showDetail(false);
       await loadList();
@@ -1088,22 +1187,69 @@
       return me;
     }
 
+    function currentTelegramId(){
+      try{
+        const tg = window.Telegram && window.Telegram.WebApp;
+        const tid = tg?.initDataUnsafe?.user?.id;
+        const n = Number(tid || 0);
+        return n || null;
+      }catch{ return null; }
+    }
+
+    function sessionTelegramId(token){
+      try{
+        const body = (token || "").split(".")[0];
+        if (!body) return null;
+        let b64 = body.replace(/-/g, "+").replace(/_/g, "/");
+        b64 += "=".repeat((4 - (b64.length % 4)) % 4);
+        const payload = JSON.parse(atob(b64));
+        const tid = Number(payload.telegram_id || 0);
+        return tid || null;
+      }catch{ return null; }
+    }
+
     async function ensureAuth(){
+      const tgId = currentTelegramId();
+
+      // 1) пробуем сохранённый токен, но только если он от ЭТОГО Telegram-аккаунта
       const stored = localStorage.getItem("cashapp_token");
       if (stored){
-        API.setToken(stored);
-        try{
-          await loadMe();
-          return true;
-        }catch{
-          API.clearToken();
+        const tokenTid = sessionTelegramId(stored);
+
+        // если открыли под другим аккаунтом — старый токен НЕ используем
+        if (tgId && tokenTid && tgId !== tokenTid){
+          localStorage.removeItem("cashapp_token");
+        } else {
+          API.setToken(stored);
+          try{
+            const me = await loadMe(); // внутри вызовет applyUser(me)
+            // финальная защита: сервер вернул того же telegram_id?
+            if (tgId && Number(me.telegram_id || 0) && Number(me.telegram_id) !== tgId){
+              API.clearToken();
+              throw new Error("Смена Telegram-аккаунта");
+            }
+            return true;
+          }catch{
+            API.clearToken();
+          }
         }
       }
+
+      // 2) делаем честную авторизацию через Telegram initData
       const res = await authTelegram();
-      if (!res || !res.token){
+      if (!res || !res.token) return false;
+
+      // убедимся, что новый токен выдан текущему Telegram-аккаунту
+      const newTid = sessionTelegramId(res.token);
+      if (tgId && newTid && tgId !== newTid){
+        API.clearToken();
+        setStatus("Ошибка", "error");
+        toast("Ошибка авторизации: токен выдан другому аккаунту");
         return false;
       }
+
       API.setToken(res.token);
+
       if (res.user){
         applyUser(res.user);
         setStatus("Готово", "success");
@@ -1112,6 +1258,7 @@
       }
       return true;
     }
+
 
     // bind
     $("tabRequests").addEventListener("click", ()=> setTab("requests"));
@@ -1132,8 +1279,8 @@
     });
 
     $("themeBtn").addEventListener("click", ()=>{
-      const cur = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-      applyTheme(cur === "dark" ? "light" : "dark");
+      const curTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+      applyTheme(curTheme === "dark" ? "light" : "dark");
     });
 
     (async function init(){
