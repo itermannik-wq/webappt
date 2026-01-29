@@ -835,9 +835,14 @@ def normalize_signature_png_bytes(png_bytes: bytes) -> bytes:
         canvas.paste(im, (pad, pad), im)
         im = canvas
 
+        # нормализуем цвет штрихов в чёрный для контраста
+        alpha = im.split()[-1]
+        black = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        black.putalpha(alpha)
+
         # композит на белый фон (RGB)
         bg = Image.new("RGB", im.size, (255, 255, 255))
-        bg.paste(im, mask=im.split()[-1])
+        bg.paste(black, mask=alpha)
 
         out = _io.BytesIO()
         bg.save(out, format="PNG", optimize=True)

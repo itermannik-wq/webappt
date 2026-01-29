@@ -635,15 +635,15 @@ def withdraw_act_xlsx(
                             img.height = 60
 
                             anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
-                            sig_cell.value = ""  # чтобы в ячейке не было текста
+                            # Фоллбек: формула IMAGE с base64 (если PIL недоступен)
+                            sig_cell.value = _signature_formula(raw)
+                            sig_cell.alignment = center  # чтобы в ячейке не было текста
                             ws.add_image(img, anchor)  # <-- ВАЖНО: именно это встраивает подпись в XLSX
                         except Exception:
                             sig_cell.value = ""
                     else:
                         sig_cell.value = ""
                 except Exception:
-                    sig_cell.value = ""
-                else:
                     sig_cell.value = ""
 
             rnum += 1
