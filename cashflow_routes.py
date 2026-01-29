@@ -521,11 +521,17 @@ def withdraw_act_xlsx(
     db_connect = _app_db_connect()
 
     try:
+        import base64
         import openpyxl
         from openpyxl.drawing.image import Image as XLImage
         from openpyxl.utils import get_column_letter
     except Exception as e:
         raise HTTPException(status_code=501, detail=f"openpyxl is not available: {e}")
+
+    def _signature_formula(png_bytes: bytes) -> str:
+        encoded = base64.b64encode(png_bytes).decode("ascii")
+        return f'=IMAGE("data:image/png;base64,{encoded}")'
+
 
     with db_connect() as conn:
         rows_all = m.list_withdraw_act_rows(conn, account=account, date_from=date_from, date_to=date_to)
@@ -625,21 +631,27 @@ def withdraw_act_xlsx(
                         raw = img_path.read_bytes()
                         raw = m.normalize_signature_png_bytes(raw)
 
-                        img = XLImage(io.BytesIO(raw))
-                        img.width = 180
-                        img.height = 60
+                        try:
+                            img = XLImage(io.BytesIO(raw))
+                            img.width = 180
+                            img.height = 60
 
-                        anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
-                        sig_cell.value = ""  # чтобы в ячейке не было текста
-                        ws.add_image(img, anchor)  # <-- ВАЖНО: именно это встраивает подпись в XLSX
+                            anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
+                            sig_cell.value = ""  # чтобы в ячейке не было текста
+                            ws.add_image(img, anchor)  # <-- ВАЖНО: именно это встраивает подпись в XLSX
+                        except Exception:
+                            sig_cell.value = _signature_formula(raw)
                     else:
-                        sig_cell.value = f"{signature_value} (PNG не найден)"
-                except Exception as e:
-                    sig_cell.value = f"{signature_value} (ошибка PNG: {e})"
+                        sig_cell.value = ""
+                    except Exception:
+                    sig_cell.value = ""
 
             # нет подписи -> что есть (например "—")
             else:
-                sig_cell.value = signature_value
+                if signature_value == "SIGNED":
+                    sig_cell.value = ""
+                else:
+                    sig_cell.value = signature_value
 
             rnum += 1
 
