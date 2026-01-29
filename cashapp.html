@@ -970,6 +970,9 @@
         this.canvas = $("sigCanvas");
         this.ctx = this.canvas.getContext("2d");
 
+        const supportsPointer = ("PointerEvent" in window);
+
+
         const resize = ()=>{
           const rect = this.canvas.getBoundingClientRect();
           const dpr = window.devicePixelRatio || 1;
@@ -983,12 +986,18 @@
 
         const pos = (e)=>{
           const rect = this.canvas.getBoundingClientRect();
-          return { x: (e.clientX - rect.left), y: (e.clientY - rect.top) };
+          const point = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+          return { x: (point.clientX - rect.left), y: (point.clientY - rect.top) };
         };
 
-        const start = (e)=>{ this.drawing = true; this.last = pos(e); };
+        const start = (e)=>{
+          if (e.cancelable) e.preventDefault();
+          this.drawing = true;
+          this.last = pos(e);
+        };
         const move = (e)=>{
           if (!this.drawing) return;
+          if (e.cancelable) e.preventDefault();
           const p = pos(e);
           this.ctx.beginPath();
           this.ctx.moveTo(this.last.x, this.last.y);
@@ -998,10 +1007,20 @@
         };
         const end = ()=>{ this.drawing = false; this.last = null; };
 
-        this.canvas.addEventListener("pointerdown", (e)=>{ this.canvas.setPointerCapture(e.pointerId); start(e); });
-        this.canvas.addEventListener("pointermove", move);
-        this.canvas.addEventListener("pointerup", end);
-        this.canvas.addEventListener("pointercancel", end);
+        if (supportsPointer){
+          this.canvas.addEventListener("pointerdown", (e)=>{ this.canvas.setPointerCapture(e.pointerId); start(e); });
+          this.canvas.addEventListener("pointermove", move);
+          this.canvas.addEventListener("pointerup", end);
+          this.canvas.addEventListener("pointercancel", end);
+        } else {
+          this.canvas.addEventListener("touchstart", start, { passive: false });
+          this.canvas.addEventListener("touchmove", move, { passive: false });
+          this.canvas.addEventListener("touchend", end);
+          this.canvas.addEventListener("touchcancel", end);
+          this.canvas.addEventListener("mousedown", start);
+          window.addEventListener("mousemove", move);
+          window.addEventListener("mouseup", end);
+        }
 
         window.addEventListener("resize", resize);
         setTimeout(resize, 0);

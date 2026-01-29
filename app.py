@@ -1141,6 +1141,26 @@ def create_cashflow_collect_request_if_needed(
             source_payload=payload,
         )
 
+def build_cashflow_signer_notification(request_id: int) -> Optional[Dict[str, Any]]:
+    import cashflow_models as cf
+
+    with db_connect() as conn:
+        cf.init_cashflow_db(conn)
+        view = cf.build_request_view(conn, request_id)
+    req = view.get("request") or {}
+    participants = view.get("participants") or []
+    signers = [p["telegram_id"] for p in participants if not p.get("is_admin")]
+    if not signers:
+        return None
+    return {
+        "request_id": int(request_id),
+        "account": req.get("account"),
+        "op_type": req.get("op_type"),
+        "amount": float(req.get("amount") or 0),
+        "signer_ids": signers,
+    }
+
+
 def finalize_cashflow_collect_request(request_id: int) -> Optional[int]:
     req = db_fetchone("SELECT * FROM cash_requests WHERE id=?;", (int(request_id),))
     if not req:
@@ -2742,6 +2762,15 @@ async def on_confirm(cq: CallbackQuery):
                 created_by_telegram_id=int(tid),
             )
             if request_id:
+                notify_payload = build_cashflow_signer_notification(request_id)
+                if notify_payload:
+                    import cashflow_bot as cfb
+
+                    await cfb.notify_signers_new_request(
+                        **notify_payload,
+                        is_retry=False,
+                        admin_comment=None,
+                    )
                 PENDING.pop(tid, None)
                 await cq.message.answer(
                     f"Создан запрос на подтверждение наличных №{request_id}. "
@@ -3731,6 +3760,7 @@ def list_services(
 def create_service(
     month_id: int,
     body: ServiceIn,
+    bg: BackgroundTasks,
     u: sqlite3.Row = Depends(require_role("admin", "accountant")),
 ):
     ensure_month_open(month_id)
@@ -3758,6 +3788,28 @@ def create_service(
             created_by_telegram_id=int(u["telegram_id"]),
         )
         if request_id:
+            notify_payload = build_cashflow_signer_notification(request_id)
+            if notify_payload:
+                import cashflow_bot as cfb
+
+                bg.add_task(
+                    cfb.notify_signers_new_request,
+                    **notify_payload,
+                    is_retry=False,
+                    admin_comment=None,
+                )
+            if cashless > 0:
+                upsert_service_cashless(
+                    month_id=month_id,
+                    service_date=service_date,
+                    income_type=income_type,
+                    account=account,
+                    cashless=cashless,
+                    user_id=int(u["id"]),
+                    now=now,
+                )
+                recalc_services_for_month(month_id)
+                ensure_tithe_expense(month_id, user_id=int(u["id"]))
             return JSONResponse(
                 status_code=202,
                 content={
