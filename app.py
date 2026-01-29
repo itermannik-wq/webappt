@@ -1185,6 +1185,19 @@ def finalize_cashflow_collect_request(request_id: int) -> Optional[int]:
         user_row = db_fetchone("SELECT id FROM users WHERE telegram_id=?;", (int(actor_tid),))
     user_id = int(user_row["id"]) if user_row else None
 
+    now = iso_now(CFG.tzinfo())
+    if cashless > 0:
+        upsert_service_cashless(
+            month_id=month_id,
+            service_date=service_date,
+            income_type=income_type,
+            account=account,
+            cashless=cashless,
+            user_id=user_id,
+            now=now,
+        )
+
+
     before = db_fetchone(
         """
         SELECT * FROM services
@@ -1193,7 +1206,9 @@ def finalize_cashflow_collect_request(request_id: int) -> Optional[int]:
         (month_id, service_date, account, income_type),
     )
 
-    now = iso_now(CFG.tzinfo())
+    if before:
+        cashless = float(before["cashless"] or 0.0)
+        total = round(cashless + cash, 2)
     if before:
         db_exec(
             """
@@ -1228,6 +1243,56 @@ def finalize_cashflow_collect_request(request_id: int) -> Optional[int]:
     recalc_services_for_month(month_id)
     ensure_tithe_expense(month_id, user_id=user_id)
     return service_id
+
+
+def upsert_service_cashless(
+    *,
+    month_id: int,
+    service_date: str,
+    income_type: str,
+    account: str,
+    cashless: float,
+    user_id: Optional[int],
+    now: str,
+) -> Optional[int]:
+    if cashless <= 0:
+        return None
+    before = db_fetchone(
+        """
+        SELECT * FROM services
+        WHERE month_id=? AND service_date=? AND account=? AND income_type=?;
+        """,
+        (month_id, service_date, account, income_type),
+    )
+    if before:
+        cash = float(before["cash"] or 0.0)
+        total = round(cashless + cash, 2)
+        db_exec(
+            """
+            UPDATE services
+            SET cashless=?, total=?, income_type=?, account=?, updated_at=?
+            WHERE id=?;
+            """,
+            (cashless, total, income_type, account, now, before["id"]),
+        )
+        after = db_fetchone("SELECT * FROM services WHERE id=?;", (before["id"],))
+        log_audit(user_id, "UPDATE", "service", int(before["id"]), dict(before), dict(after) if after else None)
+        return int(before["id"])
+
+    service_id = db_exec_returning_id(
+        """
+        INSERT INTO services (
+            month_id, service_date, idx, cashless, cash, total,
+            weekly_min_needed, mnsps_status, pvs_ratio, income_type, account,
+            created_at, updated_at
+        ) VALUES (?, ?, 0, ?, 0, ?, 0, 'Не собрана', 0, ?, ?, ?, ?);
+        """,
+        (month_id, service_date, cashless, cashless, income_type, account, now, now),
+    )
+    after = db_fetchone("SELECT * FROM services WHERE id=?;", (service_id,))
+    log_audit(user_id, "CREATE", "service", int(service_id), None, dict(after) if after else None)
+    return int(service_id)
+
 
 def register_bot_subscriber(telegram_id: int) -> None:
     now = iso_now(CFG.tzinfo())
