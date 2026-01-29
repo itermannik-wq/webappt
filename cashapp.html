@@ -590,7 +590,7 @@
           <div class="sp8"></div>
           <div class="row">
             <button id="sigClear" class="btn btnGhost" type="button">Очистить</button>
-            <button id="sigSend" class="btn btnPrimary" type="button">Подписать</button>
+            <button id="sigSend" class="btn btnPrimary" type="button" disabled>Подписать</button>
           </div>
 
           <div class="sp12"></div>
@@ -1008,6 +1008,7 @@
           this.ctx.lineCap = "round";
           updateSignatureStyle();
         };
+        this.resize = resize;
 
         const pos = (e)=>{
           const rect = this.canvas.getBoundingClientRect();
@@ -1062,6 +1063,7 @@
 
         window.addEventListener("resize", resize);
         setTimeout(resize, 0);
+        updateSignatureReady(false);
       },
       clear(){
         if (!this.ctx) return;
@@ -1153,6 +1155,7 @@
     async function openDetail(id){
       State.currentId = id;
       showDetail(true);
+      requestAnimationFrame(()=> Pad.resize?.());
       $("detailInfo").textContent = "Загрузка…";
       $("detailSub").textContent = "";
       $("finalBlock").classList.add("hidden");

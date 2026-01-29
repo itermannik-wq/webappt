@@ -6989,6 +6989,9 @@
       const ctx = canvas.getContext("2d");
       let drawing = false;
       let last = null;
+      let moved = false;
+      let hasInk = false;
+      let readyListener = null;
       const resize = ()=>{
         const rect = canvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
@@ -6999,11 +7002,20 @@
         ctx.lineCap = "round";
         ctx.strokeStyle = (document.documentElement.dataset.theme === "dark") ? "#e8eefc" : "#111";
       };
+      const setReady = (ready)=>{
+        if (hasInk === ready) return;
+        hasInk = ready;
+        if (readyListener) readyListener(ready);
+      };
       const pos = (e)=>{
         const rect = canvas.getBoundingClientRect();
         return { x: e.clientX - rect.left, y: e.clientY - rect.top };
       };
-      const start = (e)=>{ drawing = true; last = pos(e); };
+      const start = (e)=>{
+        drawing = true;
+        last = pos(e);
+        moved = false;
+      };
       const move = (e)=>{
         if (!drawing) return;
         const p = pos(e);
@@ -7012,18 +7024,42 @@
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
         last = p;
+        moved = true;
+        setReady(true);
       };
-      const end = ()=>{ drawing = false; last = null; };
+      const end = ()=>{
+        if (drawing && !moved && last){
+          ctx.beginPath();
+          ctx.moveTo(last.x, last.y);
+          ctx.lineTo(last.x + 0.1, last.y + 0.1);
+          ctx.stroke();
+          setReady(true);
+        }
+        drawing = false;
+        last = null;
+      };
 
       canvas.addEventListener("pointerdown", (e)=>{ canvas.setPointerCapture(e.pointerId); start(e); });
       canvas.addEventListener("pointermove", move);
       canvas.addEventListener("pointerup", end);
       canvas.addEventListener("pointercancel", end);
-      btn.addEventListener("click", ()=> ctx.clearRect(0, 0, canvas.width, canvas.height));
+      btn.addEventListener("click", ()=>{
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        moved = false;
+        setReady(false);
+      });
       window.addEventListener("resize", resize);
       setTimeout(resize, 0);
 
-      return { wrap, dataUrl: ()=> canvas.toDataURL("image/png") };
+      return {
+        wrap,
+        dataUrl: ()=> canvas.toDataURL("image/png"),
+        hasInk: ()=> hasInk,
+        onReadyChange: (cb)=>{
+          readyListener = cb;
+          if (readyListener) readyListener(hasInk);
+        },
+      };
     }
 
     function renderCashflowList(items){
@@ -7146,7 +7182,17 @@
         btn.type = "button";
         btn.innerHTML = `<span class="icon">check_circle</span> Подписать`;
         btn.style.marginTop = "8px";
+        btn.disabled = true;
+        btn.setAttribute("aria-disabled", "true");
+        pad.onReadyChange((ready)=>{
+          btn.disabled = !ready;
+          btn.setAttribute("aria-disabled", ready ? "false" : "true");
+        });
         btn.addEventListener("click", async ()=>{
+          if (!pad.hasInk()){
+            setToast("Нарисуйте подпись перед отправкой");
+            return;
+          }
           await API.post(`/api/cashflow/requests/${r.id}/sign`, { signature: pad.dataUrl() });
           await loadCashflowRequests();
           await openCashflowDetail(r.id);

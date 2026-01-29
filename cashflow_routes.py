@@ -640,11 +640,11 @@ def withdraw_act_xlsx(
                             sig_cell.value = ""  # чтобы в ячейке не было текста
                             ws.add_image(img, anchor)  # <-- ВАЖНО: именно это встраивает подпись в XLSX
                         except Exception:
-                            sig_cell.value = _signature_formula(raw)
+                            sig_cell.value = "Подписано"
                     else:
-                        sig_cell.value = ""
-                    except Exception:
-                    sig_cell.value = ""
+                        sig_cell.value = "Подписано"
+                except Exception:
+                    sig_cell.value = "Подписано"
 
             # нет подписи -> что есть (например "—")
             else:

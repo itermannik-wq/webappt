@@ -486,6 +486,7 @@ def record_signature(
         raise ValueError("Already decided on this attempt")
 
     png = _decode_data_url_png(signature_data_url)
+    png = normalize_signature_png_bytes(png)
     rel_path = _save_signature_png(cfg, request_id, telegram_id, attempt, png)
     now = iso_now()
     conn.execute(
