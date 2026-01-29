@@ -613,18 +613,16 @@ def withdraw_act_xlsx(
             # --- ПОДПИСЬ ---
             sig_cell = ws.cell(row=rnum, column=6)
 
-            signature_value = r.get("signature_value") or "—"
+
             signature_path = r.get("signature_path")
 
             # место под картинку
             ws.row_dimensions[rnum].height = 60
 
-            # отказ -> текст
-            if str(signature_value).startswith("ОТКАЗ"):
-                sig_cell.value = signature_value
+
 
             # подписано -> вставляем PNG (ЖИВАЯ подпись)
-            elif signature_path:
+            if signature_path:
                 try:
                     img_path = m.get_signature_file_path(cfg, str(signature_path))
                     if img_path.exists():
@@ -640,18 +638,13 @@ def withdraw_act_xlsx(
                             sig_cell.value = ""  # чтобы в ячейке не было текста
                             ws.add_image(img, anchor)  # <-- ВАЖНО: именно это встраивает подпись в XLSX
                         except Exception:
-                            sig_cell.value = "Подписано"
+                            sig_cell.value = ""
                     else:
-                        sig_cell.value = "Подписано"
+                        sig_cell.value = ""
                 except Exception:
-                    sig_cell.value = "Подписано"
-
-            # нет подписи -> что есть (например "—")
-            else:
-                if signature_value == "SIGNED":
                     sig_cell.value = ""
                 else:
-                    sig_cell.value = signature_value
+                    sig_cell.value = ""
 
             rnum += 1
 
