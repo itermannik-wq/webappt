@@ -34,6 +34,8 @@
       --radius:18px;
       --radius2:14px;
       --tap: rgba(255,255,255,.08);
+      --signature-bg: rgba(255,255,255,.08);
+      --signature-stroke: #f8fafc;
     }
 
     [data-theme="light"]{
@@ -54,6 +56,8 @@
       --overlay2: rgba(15,23,42,.22);
 
       --tap: rgba(15,23,42,.06);
+      --signature-bg: #f8fafc;
+      --signature-stroke: #0f172a;
     }
 
     .material-symbols-rounded{
@@ -298,6 +302,13 @@
       color: var(--danger);
     }
     .btn:active{ transform: scale(.99); }
+    .btn:disabled,
+    .btn[aria-disabled="true"]{
+      opacity: .55;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
 
     .sp12{ height:12px; }
     .sp8{ height:8px; }
@@ -310,7 +321,7 @@
       padding: 12px 12px;
       border-radius: 16px;
       border:1px solid var(--line);
-      background: var(--card);
+      background: var(--signature-bg);
       cursor:pointer;
       -webkit-tap-highlight-color: transparent;
     }
@@ -675,10 +686,14 @@
       const ic = document.getElementById("themeIcon");
       if (ic) ic.textContent = (theme === "dark") ? "dark_mode" : "light_mode";
 
-      // цвет пера в подписи
-      if (Pad?.ctx){
-        Pad.ctx.strokeStyle = "#0f172a"; // всегда тёмное перо
-      }
+      updateSignatureStyle();
+    }
+
+    function updateSignatureStyle(){
+      if (!Pad?.ctx) return;
+      const styles = getComputedStyle(document.documentElement);
+      const stroke = styles.getPropertyValue("--signature-stroke").trim() || "#0f172a";
+      Pad.ctx.strokeStyle = stroke;
     }
 
     function initTheme(){
@@ -763,6 +778,14 @@
       clearTimeout(toast._t);
       toast._t = setTimeout(()=> t.classList.remove("show"), 2400);
     }
+
+    function updateSignatureReady(ready){
+      const btn = $("sigSend");
+      if (!btn) return;
+      btn.disabled = !ready;
+      btn.setAttribute("aria-disabled", ready ? "false" : "true");
+    }
+
 
     function fmtMoney(n){
       const x = Number(n||0);
@@ -966,6 +989,8 @@
       ctx: null,
       drawing: false,
       last: null,
+      hasInk: false,
+      moved: false,
       init(){
         this.canvas = $("sigCanvas");
         this.ctx = this.canvas.getContext("2d");
@@ -981,7 +1006,7 @@
           this.ctx.setTransform(dpr,0,0,dpr,0,0);
           this.ctx.lineWidth = 2.4;
           this.ctx.lineCap = "round";
-          this.ctx.strokeStyle = "#0f172a"; // всегда тёмное перо
+          updateSignatureStyle();
         };
 
         const pos = (e)=>{
@@ -994,6 +1019,7 @@
           if (e.cancelable) e.preventDefault();
           this.drawing = true;
           this.last = pos(e);
+          this.moved = false;
         };
         const move = (e)=>{
           if (!this.drawing) return;
@@ -1004,8 +1030,20 @@
           this.ctx.lineTo(p.x, p.y);
           this.ctx.stroke();
           this.last = p;
+          this.moved = true;
+          this.markInk();
         };
-        const end = ()=>{ this.drawing = false; this.last = null; };
+        const end = ()=>{
+          if (this.drawing && !this.moved && this.last){
+            this.ctx.beginPath();
+            this.ctx.moveTo(this.last.x, this.last.y);
+            this.ctx.lineTo(this.last.x + 0.1, this.last.y + 0.1);
+            this.ctx.stroke();
+            this.markInk();
+          }
+          this.drawing = false;
+          this.last = null;
+        };
 
         if (supportsPointer){
           this.canvas.addEventListener("pointerdown", (e)=>{ this.canvas.setPointerCapture(e.pointerId); start(e); });
@@ -1028,9 +1066,18 @@
       clear(){
         if (!this.ctx) return;
         this.ctx.clearRect(0,0,this.canvas.width, this.canvas.height);
+        this.hasInk = false;
+        this.moved = false;
+        updateSignatureReady(false);
       },
       dataUrl(){
         return this.canvas.toDataURL("image/png");
+      },
+      markInk(){
+        if (!this.hasInk){
+          this.hasInk = true;
+          updateSignatureReady(true);
+        }
       }
     };
 
@@ -1111,6 +1158,7 @@
       $("finalBlock").classList.add("hidden");
       $("sigBlock").classList.remove("hidden");
       Pad.clear();
+      updateSignatureReady(false);
 
       const view = await API.get(`/api/cashflow/requests/${encodeURIComponent(id)}`);
       const req = view.request;
@@ -1123,7 +1171,9 @@
       const myId = State.me ? Number(State.me.telegram_id) : null;
       const mePart = participants.find(p=> Number(p.telegram_id) === myId);
       const myState = mePart ? (mePart.state || mePart.status || "") : "";
-      const already = String(myState||"").toUpperCase().includes("SIGNED") || String(myState||"").toUpperCase().includes("REFUSED");
+      const upperState = String(myState || "").toUpperCase();
+      const needsRetry = upperState.includes("RETRY");
+      const already = (upperState.includes("SIGNED") || upperState.includes("REFUSED")) && !needsRetry;
       if (already){
         $("sigBlock").classList.add("hidden");
         $("finalBlock").classList.remove("hidden");
@@ -1156,6 +1206,10 @@
     async function signCurrent(){
       const id = State.currentId;
       if (!id) return;
+      if (!Pad.hasInk){
+        toast("Нарисуйте подпись перед отправкой");
+        return;
+      }
       const sig = Pad.dataUrl();
       await API.post(`/api/cashflow/requests/${encodeURIComponent(id)}/sign`, { signature: sig });
       toast("Подписано");
