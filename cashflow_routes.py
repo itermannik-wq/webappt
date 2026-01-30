@@ -462,7 +462,11 @@ def get_signature_png(
         if not sig or str(sig.get("decision")) != "SIGNED" or not sig.get("signature_path"):
             raise HTTPException(status_code=404, detail="Signature not found")
 
-        img_path = m.get_signature_file_path(cfg, str(sig["signature_path"]))
+
+        try:
+            img_path = m.get_signature_file_path(cfg, str(sig["signature_path"]))
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Signature not found")
         if not img_path.exists():
             raise HTTPException(status_code=404, detail="Signature file missing")
 
@@ -543,6 +547,7 @@ def withdraw_act_xlsx(
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
+    temp_paths: list[str] = []
 
     def make_sheet(account_code: str, title: str):
         ws = wb.create_sheet(title)
@@ -628,21 +633,24 @@ def withdraw_act_xlsx(
 
             # подписано -> вставляем PNG (ЖИВАЯ подпись)
             if signature_path:
-                img_path = m.get_signature_file_path(cfg, str(signature_path))
-                if img_path.exists():
+                try:
+                    img_path = m.get_signature_file_path(cfg, str(signature_path))
+                except ValueError:
+                    img_path = None
+                if img_path and img_path.exists():
                     raw = m.normalize_signature_png_bytes(img_path.read_bytes())
 
                     # чтобы в ячейке не было текста
                     sig_cell.value = ""
 
-                    tmp_path = None
+
                     try:
                         # openpyxl.Image надёжнее работает с путём к файлу, чем с BytesIO (зависит от версии)
                         with tempfile.NamedTemporaryFile(prefix="sig_", suffix=".png", delete=False) as tmp:
                             tmp.write(raw)
-                            tmp_path = tmp.name
+                            temp_paths.append(tmp.name)
 
-                        img = XLImage(tmp_path)
+                        img = XLImage(temp_paths[-1])
                         img.width = 180
                         img.height = 60
                         anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
@@ -650,12 +658,7 @@ def withdraw_act_xlsx(
                     except Exception:
                         # если по какой-то причине вставка изображения не удалась — хотя бы покажем статус
                         sig_cell.value = str(signature_value or "SIGNED")
-                    finally:
-                        if tmp_path:
-                            try:
-                                os.unlink(tmp_path)
-                            except Exception:
-                                pass
+
                 else:
                     sig_cell.value = str(signature_value)
             else:
@@ -676,6 +679,11 @@ def withdraw_act_xlsx(
 
     bio = io.BytesIO()
     wb.save(bio)
+    for tmp_path in temp_paths:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
     data = bio.getvalue()
 
     filename = "withdraw_act.xlsx"

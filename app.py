@@ -980,6 +980,15 @@ def get_attachment_or_404(attachment_id: int) -> sqlite3.Row:
         raise HTTPException(status_code=404, detail="Attachment not found")
     return row
 
+def content_disposition_header(filename: str, disposition: str) -> str:
+    cleaned = re.sub(r'[\r\n"]', "_", (filename or "").strip())
+    if not cleaned:
+        cleaned = "download"
+    ascii_fallback = re.sub(r"[^\x20-\x7E]", "_", cleaned)
+    encoded = urllib.parse.quote(cleaned, safe="")
+    return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
+
+
 
 def attachment_storage_dir(entity_id: int, created_at: str) -> Path:
     try:
@@ -4721,8 +4730,8 @@ def get_attachment(
         raise HTTPException(status_code=404, detail="File not found")
 
     disposition = "inline" if int(inline or 1) == 1 else "attachment"
-    headers = {"Content-Disposition": f'{disposition}; filename="{row["orig_filename"]}"'}
-    return FileResponse(target_path, media_type=row["mime"], filename=row["orig_filename"], headers=headers)
+    headers = {"Content-Disposition": content_disposition_header(row["orig_filename"], disposition)}
+    return FileResponse(target_path, media_type=row["mime"], headers=headers)
 
 
 @APP.delete("/api/attachments/{attachment_id}")
