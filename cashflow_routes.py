@@ -31,9 +31,6 @@ from pydantic import BaseModel, Field
 import cashflow_models as m
 import cashflow_bot as b
 
-from openpyxl.drawing.image import Image as XLImage
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import datetime as dt
 
 router = APIRouter()
@@ -520,17 +517,22 @@ def withdraw_act_xlsx(
     cfg = _cash_cfg()
     db_connect = _app_db_connect()
 
-    try:
-        import base64
-        import openpyxl
-        from openpyxl.drawing.image import Image as XLImage
-        from openpyxl.utils import get_column_letter
-    except Exception as e:
-        raise HTTPException(status_code=501, detail=f"openpyxl is not available: {e}")
 
-    def _signature_formula(png_bytes: bytes) -> str:
-        encoded = base64.b64encode(png_bytes).decode("ascii")
-        return f'=IMAGE("data:image/png;base64,{encoded}")'
+
+    import base64
+    import importlib.util
+
+    if importlib.util.find_spec("openpyxl") is None:
+        raise HTTPException(status_code=501, detail="openpyxl is not available")
+
+    import openpyxl
+    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+    pil_available = importlib.util.find_spec("PIL") is not None
+    XLImage = None
+    if pil_available:
+        from openpyxl.drawing.image import Image as XLImage
 
 
     with db_connect() as conn:
@@ -629,18 +631,17 @@ def withdraw_act_xlsx(
                         raw = img_path.read_bytes()
                         raw = m.normalize_signature_png_bytes(raw)
 
+                        sig_cell.value = ""
+                        sig_cell.alignment = center  # чтобы в ячейке не было текста
                         try:
                             img = XLImage(io.BytesIO(raw))
                             img.width = 180
                             img.height = 60
 
                             anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
-                            # Фоллбек: формула IMAGE с base64 (если PIL недоступен)
-                            sig_cell.value = _signature_formula(raw)
-                            sig_cell.alignment = center  # чтобы в ячейке не было текста
                             ws.add_image(img, anchor)  # <-- ВАЖНО: именно это встраивает подпись в XLSX
                         except Exception:
-                            sig_cell.value = ""
+                            pass
                     else:
                         sig_cell.value = ""
                 except Exception:
