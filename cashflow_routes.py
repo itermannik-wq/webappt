@@ -536,9 +536,10 @@ def withdraw_act_xlsx(
         )
 
     import openpyxl
-    from openpyxl.utils import get_column_letter
+    from openpyxl.utils.units import points_to_pixels, pixels_to_EMU
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor, XDRPositiveSize2D
 
 
 
@@ -559,7 +560,7 @@ def withdraw_act_xlsx(
         ws.column_dimensions["C"].width = 16
         ws.column_dimensions["D"].width = 32
         ws.column_dimensions["E"].width = 18
-        ws.column_dimensions["F"].width = 34  # подпись
+        ws.column_dimensions["F"].width = 24  # подпись
 
         # стили
         thin = Side(style="thin", color="D0D0D0")
@@ -629,7 +630,7 @@ def withdraw_act_xlsx(
             signature_value = r.get("signature_value") or ""
 
             # место под картинку
-            ws.row_dimensions[rnum].height = 60
+            ws.row_dimensions[rnum].height = 36
 
             # подписано -> вставляем PNG (ЖИВАЯ подпись)
             if signature_path:
@@ -651,10 +652,26 @@ def withdraw_act_xlsx(
                             temp_paths.append(tmp.name)
 
                         img = XLImage(temp_paths[-1])
-                        img.width = 180
-                        img.height = 60
-                        anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
-                        ws.add_image(img, anchor)  # встраивает подпись в XLSX
+                        img.width = 120
+                        img.height = 32
+                        col_width = ws.column_dimensions["F"].width or 8.43
+                        row_height = ws.row_dimensions[rnum].height or 15
+                        cell_width_px = int(col_width * 7 + 5)
+                        cell_height_px = points_to_pixels(row_height)
+                        x_off = max((cell_width_px - img.width) / 2, 0)
+                        y_off = max((cell_height_px - img.height) / 2, 0)
+                        marker = AnchorMarker(
+                            col=5,
+                            colOff=pixels_to_EMU(int(x_off)),
+                            row=rnum - 1,
+                            rowOff=pixels_to_EMU(int(y_off)),
+                        )
+                        size = XDRPositiveSize2D(
+                            cx=pixels_to_EMU(img.width),
+                            cy=pixels_to_EMU(img.height),
+                        )
+                        img.anchor = OneCellAnchor(_from=marker, ext=size)
+                        ws.add_image(img)  # встраивает подпись в XLSX
                     except Exception:
                         # если по какой-то причине вставка изображения не удалась — хотя бы покажем статус
                         sig_cell.value = str(signature_value or "SIGNED")
