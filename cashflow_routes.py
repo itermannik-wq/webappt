@@ -519,20 +519,23 @@ def withdraw_act_xlsx(
 
 
 
-    import base64
     import importlib.util
 
     if importlib.util.find_spec("openpyxl") is None:
         raise HTTPException(status_code=501, detail="openpyxl is not available")
 
+    # Pillow нужен для вставки PNG в XLSX через openpyxl (иначе подписи не будут "живыми" картинками)
+    if importlib.util.find_spec("PIL") is None:
+        raise HTTPException(
+            status_code=501,
+            detail="Pillow (PIL) is required to embed signature images into Excel",
+        )
+
     import openpyxl
     from openpyxl.utils import get_column_letter
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.drawing.image import Image as XLImage
 
-    pil_available = importlib.util.find_spec("PIL") is not None
-    XLImage = None
-    if pil_available:
-        from openpyxl.drawing.image import Image as XLImage
 
 
     with db_connect() as conn:
@@ -614,38 +617,50 @@ def withdraw_act_xlsx(
 
             # --- ПОДПИСЬ ---
             sig_cell = ws.cell(row=rnum, column=6)
-
+            sig_cell.border = border
+            sig_cell.alignment = center
 
             signature_path = r.get("signature_path")
+            signature_value = r.get("signature_value") or ""
 
             # место под картинку
             ws.row_dimensions[rnum].height = 60
 
-
-
             # подписано -> вставляем PNG (ЖИВАЯ подпись)
             if signature_path:
-                try:
-                    img_path = m.get_signature_file_path(cfg, str(signature_path))
-                    if img_path.exists():
-                        raw = img_path.read_bytes()
-                        raw = m.normalize_signature_png_bytes(raw)
+                img_path = m.get_signature_file_path(cfg, str(signature_path))
+                if img_path.exists():
+                    raw = m.normalize_signature_png_bytes(img_path.read_bytes())
 
-                        sig_cell.value = ""
-                        sig_cell.alignment = center  # чтобы в ячейке не было текста
-                        try:
-                            img = XLImage(io.BytesIO(raw))
-                            img.width = 180
-                            img.height = 60
-
-                            anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
-                            ws.add_image(img, anchor)  # <-- ВАЖНО: именно это встраивает подпись в XLSX
-                        except Exception:
-                            pass
-                    else:
-                        sig_cell.value = ""
-                except Exception:
+                    # чтобы в ячейке не было текста
                     sig_cell.value = ""
+
+                    tmp_path = None
+                    try:
+                        # openpyxl.Image надёжнее работает с путём к файлу, чем с BytesIO (зависит от версии)
+                        with tempfile.NamedTemporaryFile(prefix="sig_", suffix=".png", delete=False) as tmp:
+                            tmp.write(raw)
+                            tmp_path = tmp.name
+
+                        img = XLImage(tmp_path)
+                        img.width = 180
+                        img.height = 60
+                        anchor = f"{get_column_letter(6)}{rnum}"  # колонка F + текущая строка
+                        ws.add_image(img, anchor)  # встраивает подпись в XLSX
+                    except Exception:
+                        # если по какой-то причине вставка изображения не удалась — хотя бы покажем статус
+                        sig_cell.value = str(signature_value or "SIGNED")
+                    finally:
+                        if tmp_path:
+                            try:
+                                os.unlink(tmp_path)
+                            except Exception:
+                                pass
+                else:
+                    sig_cell.value = str(signature_value)
+            else:
+                # нет файла подписи (например, ещё не подписано/отказ) — показываем статус текстом
+                sig_cell.value = str(signature_value)
 
             rnum += 1
 
