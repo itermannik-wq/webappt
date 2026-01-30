@@ -822,11 +822,27 @@ def normalize_signature_png_bytes(png_bytes: bytes) -> bytes:
         if im.mode != "RGBA":
             im = im.convert("RGBA")
 
-        # crop по альфе (убираем пустые поля)
+
         alpha = im.split()[-1]
+        alpha_extrema = alpha.getextrema()
+        if alpha_extrema == (255, 255):
+            # Канвас без прозрачности: строим маску по "небелым" пикселям
+            rgb = im.convert("RGB")
+            mask = Image.new("L", im.size, 0)
+            px = rgb.load()
+            mask_px = mask.load()
+            for y in range(im.size[1]):
+                for x in range(im.size[0]):
+                    r, g, b = px[x, y]
+                    if r < 250 or g < 250 or b < 250:
+                        mask_px[x, y] = 255
+            alpha = mask
+
+        # crop по альфе/маске (убираем пустые поля)
         bbox = alpha.getbbox()
         if bbox:
             im = im.crop(bbox)
+            alpha = alpha.crop(bbox)
 
         # padding
         pad = 8
@@ -834,9 +850,12 @@ def normalize_signature_png_bytes(png_bytes: bytes) -> bytes:
         canvas = Image.new("RGBA", (w + pad * 2, h + pad * 2), (255, 255, 255, 0))
         canvas.paste(im, (pad, pad), im)
         im = canvas
+        alpha = alpha.crop((0, 0, w, h))
+        padded_alpha = Image.new("L", (w + pad * 2, h + pad * 2), 0)
+        padded_alpha.paste(alpha, (pad, pad))
+        alpha = padded_alpha
 
         # нормализуем цвет штрихов в синий для контраста
-        alpha = im.split()[-1]
         blue = Image.new("RGBA", im.size, (0, 74, 173, 0))
         blue.putalpha(alpha)
 

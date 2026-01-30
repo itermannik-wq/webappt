@@ -53,6 +53,8 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
     WebAppInfo,
 )
 
@@ -2317,33 +2319,39 @@ def get_user_role_from_db(telegram_id: int) -> str:
     return str(row["role"])
 
 
-def main_menu_kb(role: str) -> InlineKeyboardMarkup:
+def main_menu_kb(role: str) -> ReplyKeyboardMarkup:
+    placeholder = "Выберите действие"
     if role == "cash_signer":
         cashapp_url = cashapp_webapp_url()
-        if not cashapp_url:
-            return InlineKeyboardMarkup(inline_keyboard=[])
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Наличные / Подписи", web_app=WebAppInfo(url=cashapp_url))],
-            ]
+        keyboard: List[List[KeyboardButton]] = []
+        if cashapp_url:
+            keyboard.append([KeyboardButton(text="Наличные / Подписи", web_app=WebAppInfo(url=cashapp_url))])
+        return ReplyKeyboardMarkup(
+            keyboard=keyboard,
+            resize_keyboard=True,
+            is_persistent=True,
+            input_field_placeholder=placeholder,
         )
 
     webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
-    buttons = [
-        *(
-            [[InlineKeyboardButton(text="Открыть бухгалтерию (WebApp)", web_app=WebAppInfo(url=webapp_url))]]
-            if webapp_url
-            else []
-        ),
+    buttons: List[List[KeyboardButton]] = []
+    if webapp_url:
+        buttons.append([KeyboardButton(text="Открыть бухгалтерию (WebApp)", web_app=WebAppInfo(url=webapp_url))])
+    buttons.append(
         [
-            InlineKeyboardButton(text="Быстрый ввод пожертвования", callback_data="quick:donation"),
-            InlineKeyboardButton(text="Быстрый ввод расхода", callback_data="quick:expense"),
-        ],
-        [InlineKeyboardButton(text="Отчёты", callback_data="menu:reports")],
-    ]
+            KeyboardButton(text="Быстрый ввод пожертвования"),
+            KeyboardButton(text="Быстрый ввод расхода"),
+        ]
+    )
+    buttons.append([KeyboardButton(text="Отчёты")])
     if role == "admin":
-        buttons.append([InlineKeyboardButton(text="Настройки", callback_data="menu:settings")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+        buttons.append([KeyboardButton(text="Настройки")])
+    return ReplyKeyboardMarkup(
+        keyboard=buttons,
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder=placeholder,
+    )
 
 
 def confirm_kb(kind: str) -> InlineKeyboardMarkup:
@@ -2548,6 +2556,43 @@ async def on_text(m: Message):
     tid = m.from_user.id
     if not is_allowed_telegram_user(tid):
         return
+
+    text = m.text.strip()
+    role = get_user_role_from_db(tid)
+    if text == "Быстрый ввод пожертвования":
+        if role not in ("admin", "accountant", "viewer"):
+            await m.answer("Нет доступа")
+            return
+        await m.answer("Отправьте сообщением: `пож 8500 4800` (безнал нал)", parse_mode="Markdown")
+        return
+    if text == "Быстрый ввод расхода":
+        if role not in ("admin", "accountant", "viewer"):
+            await m.answer("Нет доступа")
+            return
+        await m.answer("Отправьте сообщением: `расход 2500 зал`", parse_mode="Markdown")
+        return
+    if text == "Отчёты":
+        if role not in ("admin", "accountant", "viewer"):
+            await m.answer("Нет доступа")
+            return
+        await m.answer("Отчёты:", reply_markup=reports_kb())
+        return
+    if text == "Настройки":
+        if role != "admin":
+            await m.answer("Нет доступа")
+            return
+        settings_url = webapp_url_with_screen("settings")
+        inline_keyboard = []
+        if settings_url:
+            inline_keyboard.append(
+                [InlineKeyboardButton(text="Открыть настройки (WebApp)", web_app=WebAppInfo(url=settings_url))]
+            )
+        await m.answer(
+            "Настройки:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_keyboard),
+        )
+        return
+
 
     parsed = parse_quick_input(m.text)
     if not parsed:
