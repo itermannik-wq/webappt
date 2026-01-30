@@ -8267,6 +8267,21 @@
         table.appendChild(buildBudgetRowForm());
         updateBudgetEmptyState();
       });
+      $("#addCategoryBtn").addEventListener("click", ()=>{
+        if (!(State.role === "admin" || State.role === "accountant")){
+          setToast("Нет доступа");
+          return;
+        }
+        openCategoryNameModal();
+      });
+          applyTheme(theme);
+          setToast("Тема сохранена");
+        } catch(e){ alert(String(e.message||e)); }
+      });
+      $("#budgetAddRowBtn").addEventListener("click", ()=>{
+        const table = $("#budgetTable");
+        table.appendChild(buildBudgetRowForm());
+        updateBudgetEmptyState();
       $("#saveBudgetBtn").addEventListener("click", async ()=>{
         try{
           if (!State.monthId) { alert("Месяц не создан."); return; }
