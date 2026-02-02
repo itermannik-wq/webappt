@@ -3598,10 +3598,18 @@
       async get(path){
         return API.req(path, {method:"GET"});
       },
-      async getBlob(path){
+      async getBlob(path, retry=true){
         const headers = {};
         if (API.token) headers["Authorization"] = `Bearer ${API.token}`;
         const res = await fetch(`${API.baseUrl}${path}`, { method: "GET", headers });
+        if ((res.status === 401 || res.status === 403) && retry) {
+          if (res.status === 401) {
+            try{
+              await API.auth();
+              return API.getBlob(path, false);
+            }catch{}
+          }
+        }
         if (res.status === 401 || res.status === 403) {
           const txt = await res.text().catch(()=> "");
           throw new Error(`${res.status}: ${txt || "Unauthorized"}`);
@@ -3621,10 +3629,18 @@
       async del(path){
         return API.req(path, {method:"DELETE"});
       },
-      async req(path, opts={}){
+      async req(path, opts={}, retry=true){
         const headers = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
         if (API.token) headers["Authorization"] = `Bearer ${API.token}`;
         const res = await fetch(`${API.baseUrl}${path}`, { ...opts, headers });
+        if ((res.status === 401 || res.status === 403) && retry) {
+          if (res.status === 401) {
+            try{
+              await API.auth();
+              return API.req(path, opts, false);
+            }catch{}
+          }
+        }
         if (res.status === 401 || res.status === 403) {
           // bubble for caller to reauth UI if needed
           const txt = await res.text().catch(()=> "");

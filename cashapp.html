@@ -732,7 +732,7 @@
         this.token = null;
         localStorage.removeItem("cashapp_token");
       },
-      async req(method, path, body){
+      async req(method, path, body, retry=true){
         const headers = { "Content-Type": "application/json" };
         let url = this.baseUrl + path;
         if (this.token){
@@ -746,6 +746,12 @@
           credentials: "include",
           body: body ? JSON.stringify(body) : undefined,
         });
+        if (res.status === 401 && retry){
+          try{
+            const ok = await ensureAuth();
+            if (ok) return this.req(method, path, body, false);
+          }catch{}
+        }
         const txt = await res.text();
         let data = null;
         try{ data = txt ? JSON.parse(txt) : null; } catch { data = txt; }
