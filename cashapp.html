@@ -435,6 +435,21 @@
       outline:none;
       resize: vertical;
     }
+    .input{
+      width:100%;
+      border-radius:16px;
+      border:1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      padding: 12px 12px;
+      font-weight:800;
+      outline:none;
+    }
+    .errorText{
+      color: var(--danger);
+      font-size: 12px;
+      font-weight: 700;
+    }
     canvas{
       display:block;
       width: 100%;
@@ -514,6 +529,22 @@
 
       </div>
     </div>
+
+    <div id="loginCard" class="card cardPad hidden">
+      <div class="label">Вход</div>
+      <div class="field">
+        <div class="label">Логин</div>
+        <input id="loginInput" class="input" type="text" autocomplete="username" />
+      </div>
+      <div class="field">
+        <div class="label">Пароль</div>
+        <input id="passwordInput" class="input" type="password" autocomplete="current-password" />
+      </div>
+      <div id="loginError" class="errorText hidden"></div>
+      <div class="sp8"></div>
+      <button id="loginBtn" class="btn btnPrimary" type="button">Войти</button>
+    </div>
+
 
     <div class="card cardPad">
       <div class="seg" role="tablist" aria-label="Разделы">
@@ -715,20 +746,7 @@
       if (ThemeState.mode === "auto") applyTheme("auto");
     });
 
-    function readInitDataFromUrl(){
-      try{
-        const searchParams = new URLSearchParams(location.search);
-        let data = searchParams.get("tgWebAppData") || searchParams.get("initData");
-        if (!data && location.hash){
-          const hash = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
-          const hashParams = new URLSearchParams(hash);
-          data = hashParams.get("tgWebAppData") || hashParams.get("initData");
-        }
-        return data || "";
-      }catch{
-        return "";
-      }
-    }
+
 
     /**********************
      * API helper
@@ -746,7 +764,7 @@
         this.token = null;
         localStorage.removeItem("cashapp_token");
       },
-      async req(method, path, body, retry=true){
+      async req(method, path, body){
         const headers = { "Content-Type": "application/json" };
         let url = this.baseUrl + path;
         if (this.token){
@@ -760,19 +778,14 @@
           credentials: "include",
           body: body ? JSON.stringify(body) : undefined,
         });
-        if (res.status === 401 && retry){
-          try{
-            const ok = await ensureAuth();
-            if (ok) return this.req(method, path, body, false);
-          }catch{}
-        }
+
         const txt = await res.text();
         let data = null;
         try{ data = txt ? JSON.parse(txt) : null; } catch { data = txt; }
         if (!res.ok){
           if (res.status === 401){
             this.clearToken();
-            throw new Error("Требуется авторизация в Telegram");
+            throw new Error("Требуется авторизация");
           }
           if (res.status === 403){
             throw new Error("Недостаточно прав для доступа");
@@ -857,7 +870,7 @@
     }
     function applyUser(me){
       State.me = me;
-      $("roleChip").textContent = `${me.name || "Пользователь"} • ${me.role || "—"}`;
+      $("roleChip").textContent = `${me.name || me.login || "Пользователь"} • ${me.role || "—"}`;
       $("roleChip").classList.remove("hidden");
     }
     /**********************
@@ -1257,22 +1270,16 @@
     /**********************
      * Auth + init
      **********************/
-    async function authTelegram(){
-      const tg = window.Telegram && window.Telegram.WebApp;
-      if (!tg){
-        setStatus("Откройте через Telegram", "error");
+    async function authLogin(){
+      const login = ($("loginInput")?.value || "").trim();
+      const password = $("passwordInput")?.value || "";
+      if (!login || !password){
+        setLoginError("Введите логин и пароль");
         return null;
       }
-      try{
-        tg.expand && tg.expand();
-      }catch{}
-      const initData = (tg?.initData || readInitDataFromUrl() || "").trim();
-      if (!initData){
-        setStatus("Нет initData", "error");
-        return null;
-      }
+      setLoginError("");
       setStatus("Авторизация…");
-      const res = await API.post("/api/auth/telegram", { initData });
+      const res = await API.post("/api/auth/login", { login, password });
       return res;
     }
 
@@ -1283,76 +1290,40 @@
       return me;
     }
 
-    function currentTelegramId(){
-      try{
-        const tg = window.Telegram && window.Telegram.WebApp;
-        const tid = tg?.initDataUnsafe?.user?.id;
-        const n = Number(tid || 0);
-        return n || null;
-      }catch{ return null; }
+    function setLoginError(message){
+      const el = $("loginError");
+      if (!el) return;
+      if (!message){
+        el.textContent = "";
+        el.classList.add("hidden");
+        return;
+      }
+      el.textContent = message;
+      el.classList.remove("hidden");
     }
 
-    function sessionTelegramId(token){
-      try{
-        const body = (token || "").split(".")[0];
-        if (!body) return null;
-        let b64 = body.replace(/-/g, "+").replace(/_/g, "/");
-        b64 += "=".repeat((4 - (b64.length % 4)) % 4);
-        const payload = JSON.parse(atob(b64));
-        const tid = Number(payload.telegram_id || 0);
-        return tid || null;
-      }catch{ return null; }
+    function toggleLoginCard(show){
+      const card = $("loginCard");
+      if (!card) return;
+      card.classList.toggle("hidden", !show);
     }
 
     async function ensureAuth(){
-      const tgId = currentTelegramId();
 
-      // 1) пробуем сохранённый токен, но только если он от ЭТОГО Telegram-аккаунта
       const stored = localStorage.getItem("cashapp_token");
       if (stored){
-        const tokenTid = sessionTelegramId(stored);
-
-        // если открыли под другим аккаунтом — старый токен НЕ используем
-        if (tgId && tokenTid && tgId !== tokenTid){
-          localStorage.removeItem("cashapp_token");
-        } else {
-          API.setToken(stored);
-          try{
-            const me = await loadMe(); // внутри вызовет applyUser(me)
-            // финальная защита: сервер вернул того же telegram_id?
-            if (tgId && Number(me.telegram_id || 0) && Number(me.telegram_id) !== tgId){
-              API.clearToken();
-              throw new Error("Смена Telegram-аккаунта");
-            }
-            return true;
-          }catch{
-            API.clearToken();
-          }
+        API.setToken(stored);
+        try{
+          await loadMe();
+          toggleLoginCard(false);
+          return true;
+        }catch{
+          API.clearToken();
         }
       }
-
-      // 2) делаем честную авторизацию через Telegram initData
-      const res = await authTelegram();
-      if (!res || !res.token) return false;
-
-      // убедимся, что новый токен выдан текущему Telegram-аккаунту
-      const newTid = sessionTelegramId(res.token);
-      if (tgId && newTid && tgId !== newTid){
-        API.clearToken();
-        setStatus("Ошибка", "error");
-        toast("Ошибка авторизации: токен выдан другому аккаунту");
-        return false;
-      }
-
-      API.setToken(res.token);
-
-      if (res.user){
-        applyUser(res.user);
-        setStatus("Готово", "success");
-      } else {
-        await loadMe();
-      }
-      return true;
+      toggleLoginCard(true);
+      setStatus("Введите логин и пароль", "error");
+      return false;
     }
 
 
@@ -1374,6 +1345,26 @@
         .catch(e=> toast(String(e.message||e)));
     });
 
+    $("loginBtn").addEventListener("click", async ()=>{
+      try{
+        const res = await authLogin();
+        if (!res || !res.token) return;
+        API.setToken(res.token);
+        if (res.user){
+          applyUser(res.user);
+        } else {
+          await loadMe();
+        }
+        toggleLoginCard(false);
+        setStatus("Готово", "success");
+        await loadList();
+      }catch(e){
+        setLoginError(String(e.message || e));
+        setStatus("Ошибка", "error");
+      }
+    });
+
+
     $("themeBtn").addEventListener("click", ()=>{
       const curTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
       applyTheme(curTheme === "dark" ? "light" : "dark");
@@ -1392,7 +1383,7 @@
           await loadList();
         } else {
           $("listWrap").innerHTML = "";
-          $("emptyWrap").textContent = "Нужна авторизация через Telegram.";
+          $("emptyWrap").textContent = "Нужна авторизация.";
           $("emptyWrap").classList.remove("hidden");
         }
       }catch(e){

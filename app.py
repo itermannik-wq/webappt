@@ -208,6 +208,96 @@ def services_unique_has_account() -> bool:
         if cols == ["month_id", "service_date", "account", "income_type"]:
             return True
     return False
+def hash_password(raw_password: str) -> str:
+    import base64
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", raw_password.encode("utf-8"), salt, 120_000)
+    return f"pbkdf2_sha256${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
+
+
+def verify_password(raw_password: str, stored_hash: str) -> bool:
+    import base64
+    try:
+        algo, salt_b64, hash_b64 = stored_hash.split("$", 2)
+    except ValueError:
+        return False
+    if algo != "pbkdf2_sha256":
+        return False
+    try:
+        salt = base64.b64decode(salt_b64)
+        expected = base64.b64decode(hash_b64)
+    except Exception:
+        return False
+    dk = hashlib.pbkdf2_hmac("sha256", raw_password.encode("utf-8"), salt, 120_000)
+    return hmac.compare_digest(dk, expected)
+
+
+def next_virtual_telegram_id() -> int:
+    row = db_fetchone("SELECT MIN(telegram_id) AS min_tid FROM users;")
+    try:
+        min_tid = int(row["min_tid"]) if row and row["min_tid"] is not None else 0
+    except Exception:
+        min_tid = 0
+    return min_tid - 1 if min_tid <= 0 else -1
+
+
+def ensure_user_auth_fields() -> None:
+    cols = {r["name"] for r in db_fetchall("PRAGMA table_info(users);")}
+    if "login" not in cols:
+        db_exec("ALTER TABLE users ADD COLUMN login TEXT;")
+    if "password_hash" not in cols:
+        db_exec("ALTER TABLE users ADD COLUMN password_hash TEXT;")
+    if "team" not in cols:
+        db_exec("ALTER TABLE users ADD COLUMN team TEXT;")
+    if "updated_at" not in cols:
+        db_exec("ALTER TABLE users ADD COLUMN updated_at TEXT;")
+    db_exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login ON users(login);")
+
+    now = iso_now(CFG.tzinfo())
+    rows = db_fetchall(
+        "SELECT id, telegram_id, login, password_hash, created_at, updated_at FROM users;"
+    )
+    for row in rows:
+        login = str(row["login"] or "").strip()
+        if not login:
+            login = f"tg_{row['telegram_id']}"
+        password_hash = str(row["password_hash"] or "").strip()
+        if not password_hash:
+            password_hash = hash_password(secrets.token_urlsafe(12))
+        updated_at = row["updated_at"] or row["created_at"] or now
+        db_exec(
+            """
+            UPDATE users
+            SET login=?, password_hash=?, updated_at=?
+            WHERE id=?;
+            """,
+            (login, password_hash, updated_at, int(row["id"])),
+        )
+
+
+def ensure_admin_user() -> None:
+    admin_login = "2000Admin2000"
+    existing = db_fetchone("SELECT id FROM users WHERE login=?;", (admin_login,))
+    if existing:
+        return
+    now = iso_now(CFG.tzinfo())
+    db_exec(
+        """
+        INSERT INTO users (telegram_id, login, password_hash, name, team, role, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """,
+        (
+            next_virtual_telegram_id(),
+            admin_login,
+            hash_password("0000"),
+            "Администратор",
+            "Админ",
+            "admin",
+            1,
+            now,
+            now,
+        ),
+    )
 
 
 def init_db() -> None:
@@ -217,13 +307,19 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             telegram_id INTEGER UNIQUE NOT NULL,
+            login TEXT,
+            password_hash TEXT,            
             name TEXT,
+            team TEXT,            
             role TEXT NOT NULL,
             active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            updated_at TEXT
         );
         """
     )
+    ensure_user_auth_fields()
+    ensure_admin_user()
     # months
     db_exec(
         """
@@ -1058,18 +1154,33 @@ def sync_allowlist_to_db(allow: Dict[int, Dict[str, Any]]) -> None:
         if not existing:
             db_exec(
                 """
-                INSERT INTO users (telegram_id, name, role, active, created_at)
-                VALUES (?, ?, ?, ?, ?);
+                INSERT INTO users (telegram_id, login, password_hash, name, role, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (tid, u.get("name"), u.get("role", "viewer"), 1 if u.get("active", True) else 0, now),
+                (
+                    tid,
+                    f"tg_{tid}",
+                    hash_password(secrets.token_urlsafe(12)),
+                    u.get("name"),
+                    u.get("role", "viewer"),
+                    1 if u.get("active", True) else 0,
+                    now,
+                    now,
+                ),
             )
         else:
             db_exec(
                 """
-                UPDATE users SET name=?, role=?, active=?
+                UPDATE users SET name=?, role=?, active=?, updated_at=?
                 WHERE telegram_id=?;
                 """,
-                (u.get("name"), u.get("role", existing["role"]), 1 if u.get("active", True) else 0, tid),
+                (
+                    u.get("name"),
+                    u.get("role", existing["role"]),
+                    1 if u.get("active", True) else 0,
+                    now,
+                    tid,
+                ),
             )
 
 def refresh_allowlist_if_needed() -> Dict[int, Dict[str, Any]]:
@@ -2186,6 +2297,28 @@ class AuthOut(BaseModel):
     token: str
     user: Dict[str, Any]
 
+class AuthLoginIn(BaseModel):
+    login: str
+    password: str
+
+
+class AdminPasswordChangeIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UserCreateIn(BaseModel):
+    login: str
+    password: str
+    name: Optional[str] = None
+    team: Optional[str] = None
+    role: str = "viewer"
+    active: bool = True
+
+
+class UserPasswordResetIn(BaseModel):
+    password: str
+
 
 def get_bearer_token(request: Request) -> str:
     h = request.headers.get("Authorization", "").strip()
@@ -2200,13 +2333,11 @@ def get_bearer_token(request: Request) -> str:
 def get_current_user(request: Request) -> sqlite3.Row:
     token = get_bearer_token(request)
     payload = verify_session_token(token, CFG.SESSION_SECRET)
-    telegram_id = int(payload.get("telegram_id", 0))
-    if not telegram_id:
+    user_id = int(payload.get("user_id", 0))
+    if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
-    # обновляем allowlist, чтобы роли в БД не отставали от users.json
-    refresh_allowlist_if_needed()
-    u = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (telegram_id,))
+    u = db_fetchone("SELECT * FROM users WHERE id=?;", (user_id,))
     if not u or int(u["active"]) != 1:
         raise HTTPException(status_code=403, detail="User not allowed / inactive")
     return u
@@ -3505,41 +3636,138 @@ def favicon():
 # Auth
 # ---------------------------
 
-@APP.post("/api/auth/telegram", response_model=AuthOut)
-def auth_telegram(body: AuthTelegramIn, request: Request):
-    user_obj = validate_telegram_init_data(body.initData, CFG.BOT_TOKEN)
-    telegram_id = int(user_obj.get("id", 0))
-    if not telegram_id:
-        raise HTTPException(status_code=401, detail="Invalid Telegram user id")
+@APP.post("/api/auth/login", response_model=AuthOut)
+def auth_login(body: AuthLoginIn):
+    login = body.login.strip()
+    if not login:
+        raise HTTPException(status_code=400, detail="Login is required")
+    row = db_fetchone("SELECT * FROM users WHERE login=?;", (login,))
+    if not row or int(row["active"]) != 1:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not verify_password(body.password, str(row["password_hash"])):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    allow = refresh_allowlist_if_needed()
-    allow_user = allow.get(telegram_id)
-    if not allow_user or not allow_user.get("active"):
-        raise HTTPException(status_code=403, detail="User not in allowlist or inactive")
 
-    # sync single user from allowlist (in case file changed)
-    sync_allowlist_to_db({telegram_id: allow_user})
-
-    u = db_fetchone("SELECT * FROM users WHERE telegram_id=?;", (telegram_id,))
-    if not u or int(u["active"]) != 1:
-        raise HTTPException(status_code=403, detail="User inactive")
-
-    # session token
     exp = int(time.time()) + 7 * 24 * 3600
     token = make_session_token(
         {
-            "telegram_id": telegram_id,
-            "role": str(u["role"]),
+            "user_id": int(row["id"]),
+            "role": str(row["role"]),
             "exp": exp,
         },
         CFG.SESSION_SECRET,
     )
-    return {"token": token, "user": {"telegram_id": telegram_id, "name": u["name"], "role": u["role"]}}
+    return {
+        "token": token,
+        "user": {
+            "id": row["id"],
+            "telegram_id": row["telegram_id"],
+            "login": row["login"],
+            "name": row["name"],
+            "team": row["team"],
+            "role": row["role"],
+        },
+    }
 
 
 @APP.get("/api/me")
 def me(u: sqlite3.Row = Depends(get_current_user)):
-    return {"id": u["id"], "telegram_id": u["telegram_id"], "name": u["name"], "role": u["role"]}
+    return {
+        "id": u["id"],
+        "telegram_id": u["telegram_id"],
+        "login": u["login"],
+        "name": u["name"],
+        "team": u["team"],
+        "role": u["role"],
+    }
+
+
+@APP.post("/api/admin/password")
+def change_admin_password(
+        body: AdminPasswordChangeIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    if not verify_password(body.current_password, str(u["password_hash"])):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if not body.new_password.strip():
+        raise HTTPException(status_code=400, detail="New password is required")
+    now = iso_now(CFG.tzinfo())
+    db_exec(
+        "UPDATE users SET password_hash=?, updated_at=? WHERE id=?;",
+        (hash_password(body.new_password), now, int(u["id"])),
+    )
+    return {"ok": True}
+
+
+@APP.get("/api/admin/users")
+def list_users(u: sqlite3.Row = Depends(require_role("admin"))):
+    rows = db_fetchall(
+        """
+        SELECT id, telegram_id, login, name, team, role, active, created_at, updated_at
+        FROM users
+        ORDER BY id ASC;
+        """
+    )
+    return {"items": [dict(r) for r in rows]}
+
+
+@APP.post("/api/admin/users")
+def create_user(
+        body: UserCreateIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    login = body.login.strip()
+    if not login:
+        raise HTTPException(status_code=400, detail="Login is required")
+    if not body.password.strip():
+        raise HTTPException(status_code=400, detail="Password is required")
+    role = body.role.strip() or "viewer"
+    if role not in ("admin", "accountant", "viewer", "cash_signer"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    if db_fetchone("SELECT id FROM users WHERE login=?;", (login,)):
+        raise HTTPException(status_code=400, detail="Login already exists")
+    now = iso_now(CFG.tzinfo())
+    new_id = db_exec_returning_id(
+        """
+        INSERT INTO users (telegram_id, login, password_hash, name, team, role, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """,
+        (
+            next_virtual_telegram_id(),
+            login,
+            hash_password(body.password),
+            body.name,
+            body.team,
+            role,
+            1 if body.active else 0,
+            now,
+            now,
+        ),
+    )
+    row = db_fetchone(
+        "SELECT id, telegram_id, login, name, team, role, active, created_at, updated_at FROM users WHERE id=?;",
+        (new_id,),
+    )
+    return {"item": dict(row) if row else None}
+
+
+@APP.put("/api/admin/users/{user_id}/password")
+def reset_user_password(
+        user_id: int,
+        body: UserPasswordResetIn,
+        u: sqlite3.Row = Depends(require_role("admin")),
+):
+    if not body.password.strip():
+        raise HTTPException(status_code=400, detail="Password is required")
+    target = db_fetchone("SELECT id FROM users WHERE id=?;", (int(user_id),))
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    now = iso_now(CFG.tzinfo())
+    db_exec(
+        "UPDATE users SET password_hash=?, updated_at=? WHERE id=?;",
+        (hash_password(body.password), now, int(user_id)),
+    )
+    return {"ok": True}
 
 
 # ---------------------------
