@@ -3616,7 +3616,7 @@ def month_summary(
     month_id: int,
     u: sqlite3.Row = Depends(require_role("admin", "accountant", "viewer")),
 ):
-    return compute_month_summary(month_id, ensure_tithe=True)
+    return compute_month_summary(month_id, ensure_tithe=True, refresh_services=True)
 
 @APP.get("/api/months/{month_id}/budget")
 def list_month_budget(
