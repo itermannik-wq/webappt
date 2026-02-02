@@ -11,7 +11,7 @@
   <title>БУХ • Бухгалтерия</title>
 
   <!-- Telegram WebApp -->
-  <script type="text/javascript" src="https://gc.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=X8R0iz9RQu-FdWPVsNQFed9fa3WLLZS9ralG2PGfCjElspePUuPfS27avs-gVjaYHxgJvG10eKZFqUOjYOvhay69DErmfOgQvYK5nWDc7jc" charset="UTF-8"></script><script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <!-- Material Symbols -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:wght@300;400;500;600&display=swap" />
@@ -7115,7 +7115,7 @@
         if (p.state === "REFUSED_FINAL") badge = `<span class="badge bad">ОТКАЗ</span>`;
         const detail = p.detail ? ` • ${escapeHtml(p.detail)}` : "";
         return `
-          <div class="rowBetween" style="padding:6px 0; border-bottom:1px solid var(--stroke);">
+          <div class="rowBetween" style="padding:6px 0; border-bottom:1px solid var(--border);">
             <div>
               <div class="bold">${escapeHtml(p.name)}${p.is_admin ? " (админ)" : ""}</div>
               <div class="tiny muted2">${escapeHtml(p.role)}${detail}</div>
@@ -8263,7 +8263,7 @@
         } catch(e){ alert(String(e.message||e)); }
       });
 
-            $("#saveThemeBtn").addEventListener("click", async ()=>{
+      $("#saveThemeBtn").addEventListener("click", async ()=>{
         try{
           const theme = ($("#setTheme").value || "auto");
           await API.put("/api/settings", { ui_theme: theme });
@@ -8271,7 +8271,11 @@
           setToast("Тема сохранена");
         } catch(e){ alert(String(e.message||e)); }
       });
-
+      $("#budgetAddRowBtn").addEventListener("click", ()=>{
+        const table = $("#budgetTable");
+        table.appendChild(buildBudgetRowForm());
+        updateBudgetEmptyState();
+      });
       $("#addCategoryBtn").addEventListener("click", ()=>{
         if (!(State.role === "admin" || State.role === "accountant")){
           setToast("Нет доступа");
@@ -8279,13 +8283,14 @@
         }
         openCategoryNameModal();
       });
-
+          applyTheme(theme);
+          setToast("Тема сохранена");
+        } catch(e){ alert(String(e.message||e)); }
+      });
       $("#budgetAddRowBtn").addEventListener("click", ()=>{
         const table = $("#budgetTable");
         table.appendChild(buildBudgetRowForm());
         updateBudgetEmptyState();
-      });
-
       $("#saveBudgetBtn").addEventListener("click", async ()=>{
         try{
           if (!State.monthId) { alert("Месяц не создан."); return; }
@@ -8561,7 +8566,3 @@
   </script>
 </body>
 </html>
-
-
-
-
