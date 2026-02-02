@@ -1802,6 +1802,60 @@
       opacity: 1;
       transform: translateY(0);
     }
+
+    .authGate{
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: linear-gradient(180deg, rgba(11,15,20,.88), rgba(11,15,20,.94));
+      backdrop-filter: blur(12px);
+      z-index: 999;
+    }
+    .authGate.hidden{ display: none; }
+    .authGateCard{
+      width: 100%;
+      max-width: 420px;
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+    }
+    .authGateTitle{
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .authGateMessage{
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.4;
+      margin: 0 0 16px;
+    }
+    .authGateActions{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .authGateBtn{
+      flex: 1 1 140px;
+      border-radius: 14px;
+      border: 1px solid var(--stroke);
+      background: var(--card2);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .authGateBtn.primary{
+      background: linear-gradient(135deg, rgba(16,185,129,.95), rgba(52,211,153,.95));
+      border: none;
+      color: #04130d;
+      font-weight: 650;
+    }
     .check{
       width: 22px; height: 22px;
       border-radius: 50%;
@@ -2010,6 +2064,17 @@
     <div id="toastCard" class="toastCard">
       <div class="check"></div>
       <div class="small bold">Сохранено</div>
+    </div>
+  </div>
+
+  <div id="authGate" class="authGate hidden" role="dialog" aria-live="polite" aria-modal="true">
+    <div class="authGateCard">
+      <div id="authGateTitle" class="authGateTitle">Бухгалтерия</div>
+      <p id="authGateMessage" class="authGateMessage">Откройте приложение через Telegram, чтобы продолжить работу.</p>
+      <div class="authGateActions">
+        <button id="authGateReload" class="authGateBtn primary" type="button">Обновить</button>
+        <button id="authGateClose" class="authGateBtn" type="button">Закрыть</button>
+      </div>
     </div>
   </div>
 
@@ -3672,6 +3737,23 @@
       }
       return { status, detail };
     }
+
+    function showAuthGate(message){
+      const gate = $("#authGate");
+      if (!gate) return;
+      const title = $("#authGateTitle");
+      if (title) title.textContent = document.title || "Бухгалтерия";
+      const msgEl = $("#authGateMessage");
+      if (msgEl) msgEl.textContent = message || "Откройте приложение через Telegram.";
+      gate.classList.remove("hidden");
+    }
+
+    function hideAuthGate(){
+      const gate = $("#authGate");
+      if (!gate) return;
+      gate.classList.add("hidden");
+    }
+
 
 
     /**********************
@@ -8003,6 +8085,9 @@
      * Event wiring
      **********************/
     function wireEvents(){
+      $("#authGateReload")?.addEventListener("click", ()=> window.location.reload());
+      $("#authGateClose")?.addEventListener("click", ()=> $("#authGate")?.classList.add("hidden"));
+
       // nav
       $$(".navBtn").forEach(btn=>{
         btn.addEventListener("click", ()=>{
@@ -8518,10 +8603,22 @@
       // Hide settings tab label for viewer (still present but gated)
       // We'll keep it visible but will block opening.
 
+      const hasInitData = Boolean(tg?.initData);
+      const hasStoredToken = Boolean(localStorage.getItem("sessionToken"));
+      if (!hasInitData && !hasStoredToken){
+        showAuthGate("Нет initData. Откройте через Telegram.");
+        return;
+      }
+
+
       try{
         await API.ensureAuth();
+        hideAuthGate();
       }catch(e){
-        alert("Авторизация не удалась: " + String(e.message||e));
+        const parsed = parseApiError(e);
+        const raw = parsed.detail || String(e?.message || "Авторизация не удалась.");
+        const friendly = raw.includes("initData") ? "Нет initData. Откройте через Telegram." : raw;
+        showAuthGate(friendly);
         return;
       }
 
