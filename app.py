@@ -1660,10 +1660,15 @@ def ensure_tithe_expense(month_id: int, user_id: Optional[int] = None) -> None:
         log_audit(user_id, "CREATE_SYSTEM_TITHE", "expense", int(new_id), None, after)
 
 
-def compute_month_summary(month_id: int, ensure_tithe: bool = True) -> Dict[str, Any]:
+def compute_month_summary(
+    month_id: int,
+    ensure_tithe: bool = True,
+    refresh_services: bool = False,
+) -> Dict[str, Any]:
     m = get_month_by_id(month_id)
-    # Services should be recalculated in case weekly_min_needed changed
-    recalc_services_for_month(month_id)
+    if refresh_services:
+        # Services should be recalculated in case weekly_min_needed changed
+        recalc_services_for_month(month_id)
 
     if ensure_tithe:
         ensure_tithe_expense(month_id, user_id=None)
@@ -1830,7 +1835,7 @@ def compute_year_analytics(year: int) -> Dict[str, Any]:
             )
             continue
 
-        summary = compute_month_summary(int(row["id"]), ensure_tithe=True)
+        summary = compute_month_summary(int(row["id"]), ensure_tithe=False, refresh_services=False)
         income = float(summary["month_income_sum"])
         expenses = float(summary["month_expenses_sum"])
         balance = float(summary["month_balance"])
@@ -1895,7 +1900,7 @@ def compute_year_analytics(year: int) -> Dict[str, Any]:
     }
     prev_months = db_fetchall("SELECT id FROM months WHERE year=?;", (prev_year,))
     for row in prev_months:
-        summary = compute_month_summary(int(row["id"]), ensure_tithe=True)
+        summary = compute_month_summary(int(row["id"]), ensure_tithe=False, refresh_services=False)
         prev_totals["income"] += float(summary["month_income_sum"])
         prev_totals["expenses"] += float(summary["month_expenses_sum"])
         prev_totals["balance"] += float(summary["month_balance"])
