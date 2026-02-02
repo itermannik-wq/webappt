@@ -3604,13 +3604,31 @@
       }catch{ return null; }
     }
 
+    async function waitForTelegramInitData({ timeoutMs = 1500, intervalMs = 150 } = {}){
+      if (tg?.initData) return tg.initData;
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs){
+        await new Promise(resolve => setTimeout(resolve, intervalMs));
+        if (tg?.initData) return tg.initData;
+      }
+      return "";
+    }
+
+    async function getTelegramInitData(){
+      const raw = tg?.initData || "";
+      if (raw) return raw;
+      if (!tg) return "";
+      return waitForTelegramInitData();
+    }
+
+
 
     const API = {
       token: null,
       user: null,
       baseUrl: location.origin, // same host
       async auth(){
-        const initData = tg?.initData || "";
+        const initData = await getTelegramInitData();
         if (!initData) throw new Error("Нет initData. Откройте через Telegram.");
         const res = await fetch(`${API.baseUrl}/api/auth/telegram`,{
           method:"POST",
@@ -8603,7 +8621,8 @@
       // Hide settings tab label for viewer (still present but gated)
       // We'll keep it visible but will block opening.
 
-      const hasInitData = Boolean(tg?.initData);
+      const initData = await getTelegramInitData();
+      const hasInitData = Boolean(initData);
       const hasStoredToken = Boolean(localStorage.getItem("sessionToken"));
       if (!hasInitData && !hasStoredToken){
         showAuthGate("Нет initData. Откройте через Telegram.");
