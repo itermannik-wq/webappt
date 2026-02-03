@@ -2092,19 +2092,23 @@
       <div class="form" style="gap:12px;">
         <div class="field authRegisterOnly hidden">
           <label>Имя</label>
-          <input id="authNameInput" class="input" type="text" autocomplete="name" />
+          <input id="authNameInput" class="input" type="text" autocomplete="name" placeholder="Напр.: Никита" />
+          <div class="tiny muted2">Имя или как к вам обращаться в отчётах.</div>
         </div>
         <div class="field authRegisterOnly hidden">
           <label>Тим / команда</label>
-          <input id="authTeamInput" class="input" type="text" autocomplete="organization" />
+          <input id="authTeamInput" class="input" type="text" autocomplete="organization" placeholder="Напр.: admin или Бухгалтерия" />
+          <div class="tiny muted2">Название команды/проекта, как в вашей учётке.</div>
         </div>
         <div class="field">
           <label>Логин</label>
-          <input id="authLoginInput" class="input" type="text" autocomplete="username" />
+          <input id="authLoginInput" class="input" type="text" autocomplete="username" placeholder="Напр.: admin" />
+          <div class="tiny muted2">Латиница/цифры, без пробелов.</div>
         </div>
         <div class="field">
           <label>Пароль</label>
-          <input id="authPasswordInput" class="input" type="password" autocomplete="current-password" />
+          <input id="authPasswordInput" class="input" type="password" autocomplete="current-password" placeholder="Минимум 6 символов" />
+          <div class="tiny muted2">Используйте минимум 6 символов.</div>
         </div>
         <div id="authGateError" class="tiny authGateError hidden"></div>
       </div>
