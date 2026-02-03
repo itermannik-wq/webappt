@@ -123,6 +123,14 @@
       border: 1px solid var(--stroke);
       box-shadow: none;
     }
+    .authBtn{
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
+    }
     .icon{
       font-family: "Material Symbols Rounded";
       font-weight: 500;
@@ -2102,6 +2110,7 @@
         </button>
       </div>
       <div class="row" style="gap:10px;">
+        <button id="authBtn" class="pill authBtn" type="button">Авторизация</button>
         <button id="refreshBtn" class="btnIcon" type="button" aria-label="Обновить">
           <span class="icon">refresh</span>
         </button>
@@ -3771,7 +3780,12 @@
       if (title) title.textContent = "Вход в систему";
       const msgEl = $("#authGateMessage");
       if (msgEl) msgEl.textContent = message || "Введите логин и пароль.";
+      setAuthError("");
       gate.classList.remove("hidden");
+      const loginInput = $("#authLoginInput");
+      if (loginInput) {
+        setTimeout(()=> loginInput.focus({preventScroll:true}), 0);
+      }
     }
 
     function setAuthError(message){
@@ -3786,6 +3800,12 @@
       el.classList.remove("hidden");
     }
 
+    function hideAuthGate(){
+      const gate = $("#authGate");
+      if (!gate) return;
+      gate.classList.add("hidden");
+      setAuthError("");
+    }
 
 
     /**********************
@@ -8187,6 +8207,10 @@
         if (loginInput) loginInput.value = "";
         if (passInput) passInput.value = "";
         setAuthError("");
+      });
+
+      $("#authBtn")?.addEventListener("click", ()=>{
+        showAuthGate("Введите логин и пароль.");
       });
 
       $("#createUserBtn")?.addEventListener("click", async ()=>{
