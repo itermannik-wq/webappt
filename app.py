@@ -3557,6 +3557,7 @@ async def lifespan(app: FastAPI):
 
 
 APP = FastAPI(title="Church Accounting Bot", version="1.0.0", lifespan=lifespan)
+app = APP
 
 APP.add_middleware(
     CORSMiddleware,
