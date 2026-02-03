@@ -2457,31 +2457,12 @@ def get_user_role_from_db(telegram_id: int) -> str:
 
 def main_menu_kb(role: str) -> ReplyKeyboardMarkup:
     placeholder = "Выберите действие"
-    if role == "cash_signer":
-        cashapp_url = cashapp_webapp_url()
-        keyboard: List[List[KeyboardButton]] = []
-        if cashapp_url:
-            keyboard.append([KeyboardButton(text="Наличные / Подписи", web_app=WebAppInfo(url=cashapp_url))])
-        return ReplyKeyboardMarkup(
-            keyboard=keyboard,
-            resize_keyboard=True,
-            is_persistent=True,
-            input_field_placeholder=placeholder,
-        )
+
 
     webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
     buttons: List[List[KeyboardButton]] = []
     if webapp_url:
-        buttons.append([KeyboardButton(text="Открыть бухгалтерию (WebApp)", web_app=WebAppInfo(url=webapp_url))])
-    buttons.append(
-        [
-            KeyboardButton(text="Быстрый ввод пожертвования"),
-            KeyboardButton(text="Быстрый ввод расхода"),
-        ]
-    )
-    buttons.append([KeyboardButton(text="Отчёты")])
-    if role == "admin":
-        buttons.append([KeyboardButton(text="Настройки")])
+        buttons.append([KeyboardButton(text="Пройти авторизацию", web_app=WebAppInfo(url=webapp_url))])
     return ReplyKeyboardMarkup(
         keyboard=buttons,
         resize_keyboard=True,
@@ -2671,14 +2652,13 @@ async def on_start(m: Message):
     if tid:
         register_bot_subscriber(tid)
 
-    role = get_user_role_from_db(tid)
+
     await m.answer(
-        "Меню бухгалтерии:",
-        reply_markup=main_menu_kb(role),
+        "Для входа в систему нажмите «Пройти авторизацию».",
+        reply_markup=main_menu_kb(""),
     )
     webapp_url = require_https_webapp_url(CFG.WEBAPP_URL)
-    cashapp_url = cashapp_webapp_url()
-    if not webapp_url or (role == "cash_signer" and not cashapp_url):
+    if not webapp_url:
         await m.answer(
             "Внимание: WebApp-кнопки доступны только по HTTPS.\n"
             "Настройте публичный HTTPS-домен и задайте APP_URL/WEBAPP_URL в .env."
