@@ -3670,70 +3670,70 @@ def auth_login(body: AuthLoginIn):
         existing_request = db_fetchone(
             "SELECT id, status FROM registration_requests WHERE login=?;",
             (login,),
-    )
-    if existing_request and str(existing_request["status"]) == "pending":
-        raise HTTPException(status_code=400, detail="Registration request already pending")
-
-    now = iso_now(CFG.tzinfo())
-    if not admin_exists():
-        new_id = db_exec_returning_id(
-            """
-            INSERT INTO users (telegram_id, login, password_hash, name, team, role, active, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """,
-            (
-                next_virtual_telegram_id(),
-                login,
-                hash_password(body.password),
-                body.name,
-                body.team,
-                "admin",
-                1,
-                now,
-                now,
-            ),
         )
-        row = db_fetchone("SELECT * FROM users WHERE id=?;", (new_id,))
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to create admin")
-        payload = make_auth_response(row)
-        payload["status"] = "approved"
-        return payload
+        if existing_request and str(existing_request["status"]) == "pending":
+            raise HTTPException(status_code=400, detail="Registration request already pending")
 
-    if existing_request:
-        db_exec(
+        now = iso_now(CFG.tzinfo())
+        if not admin_exists():
+            new_id = db_exec_returning_id(
+                """
+                INSERT INTO users (telegram_id, login, password_hash, name, team, role, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    next_virtual_telegram_id(),
+                    login,
+                    hash_password(body.password),
+                    body.name,
+                    body.team,
+                    "admin",
+                    1,
+                    now,
+                    now,
+                ),
+            )
+            row = db_fetchone("SELECT * FROM users WHERE id=?;", (new_id,))
+            if not row:
+                raise HTTPException(status_code=500, detail="Failed to create admin")
+            payload = make_auth_response(row)
+            payload["status"] = "approved"
+            return payload
+
+        if existing_request:
+            db_exec(
+                """
+                UPDATE registration_requests
+                SET password_hash=?, name=?, team=?, role=?, status='pending',
+                    created_at=?, reviewed_at=NULL, reviewed_by_user_id=NULL
+                WHERE id=?;
+                """,
+                (
+                    hash_password(body.password),
+                    body.name,
+                    body.team,
+                    "cash_signer",
+                    now,
+                    int(existing_request["id"]),
+                ),
+            )
+            return {"status": "pending", "request_id": int(existing_request["id"])}
+
+        req_id = db_exec_returning_id(
             """
-            UPDATE registration_requests
-            SET password_hash=?, name=?, team=?, role=?, status='pending',
-                created_at=?, reviewed_at=NULL, reviewed_by_user_id=NULL
-            WHERE id=?;
+            INSERT INTO registration_requests (login, password_hash, name, team, role, status, created_at)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?);
             """,
             (
+                login,
                 hash_password(body.password),
                 body.name,
                 body.team,
                 "cash_signer",
                 now,
-                int(existing_request["id"]),
             ),
         )
-        return {"status": "pending", "request_id": int(existing_request["id"])}
-
-    req_id = db_exec_returning_id(
-        """
-        INSERT INTO registration_requests (login, password_hash, name, team, role, status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?);
-        """,
-        (
-            login,
-            hash_password(body.password),
-            body.name,
-            body.team,
-            "cash_signer",
-            now,
-        ),
-    )
-    return {"status": "pending", "request_id": req_id}
+        return {"status": "pending", "request_id": req_id}
 
 
 @APP.get("/api/me")
@@ -5658,7 +5658,6 @@ def export_excel(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
-
 # ---------------------------
 # Run (local)
 # ---------------------------
@@ -5667,7 +5666,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "app:APP",
+        APP,
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8000")),
         reload=False,
