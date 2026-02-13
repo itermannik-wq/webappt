@@ -6859,6 +6859,14 @@
       const suite = $("#diagSuite")?.value || "quick";
       const mode = document.querySelector('input[name="diagMode"]:checked')?.value || "safe";
       const timeout = Number($("#diagTimeoutSec")?.value || 120);
+      const telegramChecked = !!$("#diagCheckTelegram")?.checked;
+      let telegramTargetId = telegramChecked ? Number($("#diagTelegramTargetId")?.value || 0) || null : null;
+      if (mode === "live" && telegramChecked && !telegramTargetId){
+        telegramTargetId = Number(API.user?.telegram_id || 0) || null;
+        if (telegramTargetId){
+          $("#diagTelegramTargetId").value = String(telegramTargetId);
+        }
+      }
       const body = {
         suite,
         mode,
@@ -6869,12 +6877,15 @@
           check_backups: !!$("#diagCheckBackups")?.checked,
           check_backup_zip: !!$("#diagCheckBackupZip")?.checked,
           check_scheduler: !!$("#diagCheckScheduler")?.checked,
-          check_telegram: !!$("#diagCheckTelegram")?.checked,
-          telegram_target_id: $("#diagCheckTelegram")?.checked ? Number($("#diagTelegramTargetId")?.value || 0) || null : null,
+          check_telegram: telegramChecked,
+          telegram_target_id: telegramTargetId,
           timeout_sec: timeout,
           fail_fast: !!$("#diagFailFast")?.checked
         }
       };
+      if (mode === "live" && telegramChecked && !telegramTargetId){
+        throw new Error("Для LIVE + Telegram укажите telegram_target_id (или используйте свой Telegram ID).");
+      }
       const res = await API.post("/api/admin/diagnostics/run", body);
       State.diagRunId = res.run_id;
       $("#diagCurrentStatus").textContent = `Прогон #${res.run_id}: running`;
@@ -8661,7 +8672,13 @@
         openDownload(`${API.baseUrl}/admin/diagnostics/runs/${State.diagRunId}/report`);
       });
       $("#diagCheckTelegram")?.addEventListener("change", (e)=>{
-        $("#diagTelegramTargetId").style.display = e.target.checked ? "block" : "none";
+        const input = $("#diagTelegramTargetId");
+        if (!input) return;
+        input.style.display = e.target.checked ? "block" : "none";
+        if (e.target.checked && !input.value){
+          const selfTid = Number(API.user?.telegram_id || 0) || null;
+          if (selfTid) input.value = String(selfTid);
+        }
       });
     }
 
