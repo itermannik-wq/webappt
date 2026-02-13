@@ -5040,10 +5040,37 @@ async def _diag_sleep_cancelable(ctx: DiagnosticsContext, delay: float = 0.0) ->
 
 
 async def _diag_config_env_required(ctx: DiagnosticsContext) -> Dict[str, Any]:
-    required = ["BOT_TOKEN", "APP_URL", "WEBAPP_URL", "DB_PATH", "USERS_JSON", "SESSION_SECRET"]
-    missing = [k for k in required if not os.getenv(k, "").strip()]
+    required = {
+        "BOT_TOKEN": CFG.BOT_TOKEN,
+        "APP_URL": CFG.APP_URL,
+        "WEBAPP_URL": CFG.WEBAPP_URL,
+        "DB_PATH": CFG.DB_PATH,
+        "USERS_JSON": CFG.USERS_JSON_PATH,
+        "SESSION_SECRET": CFG.SESSION_SECRET,
+    }
+    missing = [name for name, value in required.items() if not str(value or "").strip()]
     if missing:
         return {"status": "fail", "message_ru": f"Не задано: {', '.join(missing)}", "details": {"missing": missing}}
+
+    defaulted = []
+    if not os.getenv("APP_URL", "").strip():
+        defaulted.append("APP_URL")
+    if not os.getenv("WEBAPP_URL", "").strip():
+        defaulted.append("WEBAPP_URL")
+    if not os.getenv("DB_PATH", "").strip():
+        defaulted.append("DB_PATH")
+    if not os.getenv("USERS_JSON", "").strip():
+        defaulted.append("USERS_JSON")
+    if not os.getenv("SESSION_SECRET", "").strip():
+        defaulted.append("SESSION_SECRET")
+
+    if defaulted:
+        return {
+            "status": "warn",
+            "message_ru": "Часть ENV не задана явно — используются значения по умолчанию",
+            "details": {"defaulted": defaulted},
+        }
+
     return {"status": "success", "message_ru": "Обязательные переменные окружения заполнены", "details": {}}
 
 
