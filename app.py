@@ -5173,7 +5173,11 @@ async def _diag_logic_sandbox_crud(ctx: DiagnosticsContext) -> Dict[str, Any]:
         month_id = int(conn.execute("SELECT id FROM months ORDER BY id DESC LIMIT 1;").fetchone()[0])
         conn.execute("INSERT INTO categories (name, is_active, sort_order, created_at, updated_at) VALUES (?,1,0,?,?);", (f"diag-cat-{ctx.run_id}", now, now))
         cat_id = int(conn.execute("SELECT id FROM categories ORDER BY id DESC LIMIT 1;").fetchone()[0])
-        conn.execute("INSERT INTO tags (name, created_at, updated_at) VALUES (?, ?, ?);", (f"diag-tag-{ctx.run_id}", now, now))
+        diag_tag = f"diag-tag-{ctx.run_id}"
+        conn.execute(
+            "INSERT INTO tags (name, name_norm, created_at, updated_at) VALUES (?, ?, ?, ?);",
+            (diag_tag, normalize_tag_name(diag_tag), now, now),
+        )
         conn.execute("INSERT INTO expenses (month_id, expense_date, category_id, amount, note, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, 1.0, 'diag', ?, ?, ?);", (month_id, now[:10], cat_id, uid, now, now))
         exp_id = int(conn.execute("SELECT id FROM expenses ORDER BY id DESC LIMIT 1;").fetchone()[0])
         conn.execute("DELETE FROM expenses WHERE id=?;", (exp_id,))
