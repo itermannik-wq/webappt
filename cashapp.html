@@ -22,7 +22,7 @@
       --muted:rgba(255,255,255,.65);
       --muted2:rgba(255,255,255,.45);
       --line:rgba(255,255,255,.10);
-      --shadow: 0 18px 40px rgba(0,0,0,.40);
+      --shadow: 0 10px 30px rgba(0,0,0,.30);
       --primary:#10b981;
       --primary2:#34d399;
       --danger:#fb7185;
@@ -42,22 +42,22 @@
       --bg:#f4f6fa;
       --card:#ffffff;
       --card2:#eef2f7;
-      --text:#0f172a;
+      --text:#111827;
       --muted:#4b5563;
       --muted2:#6b7280;
-      --line:rgba(15,23,42,.10);
+      --line:rgba(15,23,42,.12);
       --shadow: 0 10px 24px rgba(15,23,42,.10);
       --primary:#10b981;
-      --primary2:#15b981;
+      --primary2:#34d399;
       --danger:#ef4444;
       --warn:#f59e0b;
 
-      --overlay: rgba(255,255,255,.60);
-      --overlay2: rgba(15,23,42,.22);
+      --overlay: rgba(244,246,250,.72);
+      --overlay2: rgba(15,23,42,.20);
 
       --tap: rgba(15,23,42,.06);
-      --signature-bg: #f8fafc;
-      --signature-stroke: #0000ff;
+      --signature-bg: #ffffff;
+      --signature-stroke: #0f172a;
     }
 
     .material-symbols-rounded{
@@ -71,9 +71,7 @@
     body{
       margin:0;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
-      background: radial-gradient(900px 600px at 20% -10%, rgba(16,185,129,.18), transparent 60%),
-                  radial-gradient(900px 600px at 90% 0%, rgba(52,211,153,.16), transparent 62%),
-                  var(--bg);
+      background: var(--bg);
       color:var(--text);
     }
     .wrap{
@@ -155,6 +153,31 @@
     }
     .iconBtn:active{ transform: scale(.98); background: var(--tap); }
 
+    .themePill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--card2);
+      color: var(--text);
+      font-weight: 800;
+      font-size: 12px;
+      letter-spacing: .2px;
+      cursor:pointer;
+      user-select:none;
+      -webkit-tap-highlight-color: transparent;
+      box-shadow: var(--shadow);
+      transition: transform .12s ease, background .12s ease, color .12s ease;
+    }
+    .themePill.active{
+      background: var(--primary);
+      color: #fff;
+      border-color: transparent;
+    }
+    .themePill:active{ transform: scale(.98); background: var(--tap); }
+
     .card{
       background: var(--card);
       border: 1px solid var(--line);
@@ -187,7 +210,7 @@
       color: var(--text);
       background: rgba(16,185,129,.16);
       border: 1px solid rgba(16,185,129,.25);
-      box-shadow: 0 10px 18px rgba(16,185,129,.12);
+      box-shadow: none;
     }
 
     .row{
@@ -287,9 +310,9 @@
       white-space:nowrap;
     }
     .btnPrimary{
-      background: linear-gradient(180deg, var(--primary), var(--primary2));
+      background: var(--primary);
       color:#fff;
-      box-shadow: 0 14px 26px rgba(21,185,129,.25);
+      box-shadow: none;
     }
     .btnGhost{
       background: var(--card);
@@ -520,29 +543,21 @@
         </div>
       </div>
       <div class="actions">
+        <button id="lightThemeBtn" class="themePill" type="button" title="Светлая тема">
+          <span class="material-symbols-rounded">light_mode</span>
+          Светлая
+        </button>
         <button id="themeBtn" class="iconBtn" type="button" title="Тема">
           <span class="material-symbols-rounded" id="themeIcon">dark_mode</span>
         </button>
-        <button id="refreshBtn" class="iconBtn" type="button" title="Обновить">
-          <span class="material-symbols-rounded">refresh</span>
-        </button>
-
       </div>
     </div>
 
-    <div id="loginCard" class="card cardPad hidden">
-      <div class="label">Вход</div>
-      <div class="field">
-        <div class="label">Логин</div>
-        <input id="loginInput" class="input" type="text" autocomplete="username" />
+    <div id="authCard" class="card cardPad hidden">
+      <div class="label">Авторизация</div>
+      <div class="muted small" id="authMessage">
+        Откройте приложение через Telegram, чтобы пройти авторизацию по Telegram ID.
       </div>
-      <div class="field">
-        <div class="label">Пароль</div>
-        <input id="passwordInput" class="input" type="password" autocomplete="current-password" />
-      </div>
-      <div id="loginError" class="errorText hidden"></div>
-      <div class="sp8"></div>
-      <button id="loginBtn" class="btn btnPrimary" type="button">Войти</button>
     </div>
 
 
@@ -645,13 +660,15 @@
     /**********************
      * Telegram + Theme (как в основном WebApp)
      **********************/
-    const tg = window.Telegram?.WebApp;
+    function getTelegramWebApp(){
+      return window.Telegram?.WebApp || null;
+    }
     const ThemeState = {
       mode: "auto", // auto|dark|light
       media: window.matchMedia?.("(prefers-color-scheme: dark)")
     };
 
-    const tgThemeParams = tg?.themeParams || {};
+    const tgThemeParams = getTelegramWebApp()?.themeParams || {};
 
     function detectTelegramTheme(){
       try{
@@ -717,6 +734,13 @@
       const ic = document.getElementById("themeIcon");
       if (ic) ic.textContent = (theme === "dark") ? "dark_mode" : "light_mode";
 
+      const lightBtn = document.getElementById("lightThemeBtn");
+      if (lightBtn){
+        const isLightMode = ThemeState.mode === "light";
+        lightBtn.classList.toggle("active", isLightMode);
+        lightBtn.setAttribute("aria-pressed", isLightMode ? "true" : "false");
+      }
+
       updateSignatureStyle();
     }
 
@@ -737,22 +761,75 @@
     }
 
     // ВАЖНО: готовим Telegram WebApp (без этого часто нет initData/объекта)
-    if (tg){
-      try{ tg.ready(); }catch{}
-      try{ tg.expand(); }catch{}
+    const tgApp = getTelegramWebApp();
+    if (tgApp){
+      try{ tgApp.ready(); }catch{}
+      try{ tgApp.expand(); }catch{}
     }
 
     ThemeState.media?.addEventListener?.("change", ()=>{
       if (ThemeState.mode === "auto") applyTheme("auto");
     });
 
+    function getRawQueryParam(raw, key){
+      if (!raw) return "";
+      const trimmed = raw.replace(/^[?#]/, "");
+      if (!trimmed) return "";
+      const needle = `${encodeURIComponent(key)}=`;
+      const start = trimmed.indexOf(needle);
+      if (start === -1) return "";
+      const valueStart = start + needle.length;
+      const end = trimmed.indexOf("&", valueStart);
+      return end === -1 ? trimmed.slice(valueStart) : trimmed.slice(valueStart, end);
+    }
 
+    function consumeMagicTokenFromUrl(){
+      try{
+        const url = new URL(window.location.href);
+        const token = url.searchParams.get("token") || "";
+        if (token){
+          url.searchParams.delete("token");
+          history.replaceState({}, document.title, url.toString());
+        }
+        return token;
+      }catch{
+        return "";
+      }
+    }
+
+    function getInitDataFromUrl(){
+      try{
+        const fromSearch = getRawQueryParam(location.search || "", "tgWebAppData");
+        if (fromSearch) return fromSearch;
+        const fromHash = getRawQueryParam(location.hash || "", "tgWebAppData");
+        return fromHash || "";
+      }catch{
+        return "";
+      }
+    }
+
+    function getTelegramInitData(){
+      const liveTg = getTelegramWebApp();
+      return liveTg?.initData || getInitDataFromUrl();
+    }
 
     /**********************
      * API helper
      **********************/
     const API = {
-      baseUrl: location.origin,
+      baseUrl: (() => {
+        const params = new URLSearchParams(location.search);
+        const apiParam = params.get("api");
+        if (apiParam && apiParam.trim()){
+          try{
+            const parsed = new URL(apiParam, location.origin);
+            return (parsed.origin + parsed.pathname).replace(/\/$/, "");
+          }catch{
+            return apiParam.replace(/\/$/, "");
+          }
+        }
+        return location.origin;
+      })(),
       token: null,
       setToken(token){
         this.token = token || null;
@@ -797,6 +874,28 @@
       },
       get(p){ return this.req("GET", p); },
       post(p,b){ return this.req("POST", p, b); },
+      async authMagic(loginToken){
+        const res = await fetch(`${this.baseUrl}/api/auth/magic/exchange`,{
+          method: "POST",
+          headers: { "Authorization": `Bearer ${loginToken}` },
+        });
+        const txt = await res.text();
+        let data = null;
+        try{ data = txt ? JSON.parse(txt) : null; } catch { data = txt; }
+        if (!res.ok){
+          if (res.status === 401){
+            throw new Error("Ссылка истекла или недействительна.");
+          }
+          if (res.status === 403){
+            throw new Error("Недостаточно прав для доступа.");
+          }
+          const msg = (data && data.detail) ? data.detail : (typeof data === "string" ? data : "Ошибка авторизации");
+          throw new Error(msg);
+        }
+        if (data?.token) this.setToken(data.token);
+        if (data?.user) applyUser(data.user);
+        return data;
+      },
     };
 
     /**********************
@@ -817,6 +916,11 @@
       if (!btn) return;
       btn.disabled = !ready;
       btn.setAttribute("aria-disabled", ready ? "false" : "true");
+    }
+
+    function syncSignatureReady(){
+      if (!Pad) return;
+      updateSignatureReady(!!(Pad.hasInk && Pad.moved));
     }
 
 
@@ -1111,8 +1215,8 @@
       markInk(){
         if (!this.hasInk){
           this.hasInk = true;
-          updateSignatureReady(true);
         }
+        syncSignatureReady();
       }
     };
 
@@ -1242,7 +1346,7 @@
     async function signCurrent(){
       const id = State.currentId;
       if (!id) return;
-      if (!Pad.hasInk){
+      if (!Pad.hasInk || !Pad.moved){
         toast("Нарисуйте подпись перед отправкой");
         return;
       }
@@ -1270,18 +1374,7 @@
     /**********************
      * Auth + init
      **********************/
-    async function authLogin(){
-      const login = ($("loginInput")?.value || "").trim();
-      const password = $("passwordInput")?.value || "";
-      if (!login || !password){
-        setLoginError("Введите логин и пароль");
-        return null;
-      }
-      setLoginError("");
-      setStatus("Авторизация…");
-      const res = await API.post("/api/auth/login", { login, password });
-      return res;
-    }
+
 
     async function loadMe(){
       const me = await API.get("/api/me");
@@ -1290,40 +1383,117 @@
       return me;
     }
 
-    function setLoginError(message){
-      const el = $("loginError");
-      if (!el) return;
-      if (!message){
-        el.textContent = "";
-        el.classList.add("hidden");
-        return;
+    function loadStoredToken(){
+      const storedToken = localStorage.getItem("cashapp_token");
+      if (storedToken){
+        API.token = storedToken;
       }
-      el.textContent = message;
-      el.classList.remove("hidden");
     }
 
-    function toggleLoginCard(show){
-      const card = $("loginCard");
+
+    function toggleAuthCard(show, message){
+      const card = $("authCard");
       if (!card) return;
+      if (message){
+        $("authMessage").textContent = message;
+      }
       card.classList.toggle("hidden", !show);
     }
 
     async function ensureAuth(){
+      const initData = getTelegramInitData();
+      const isTelegramContext = !!getTelegramWebApp();
 
-      const stored = localStorage.getItem("cashapp_token");
-      if (stored){
-        API.setToken(stored);
-        try{
-          await loadMe();
-          toggleLoginCard(false);
-          return true;
-        }catch{
-          API.clearToken();
+      try{
+        setStatus("Авторизация…");
+        const magicToken = consumeMagicTokenFromUrl();
+        if (magicToken){
+          await API.authMagic(magicToken);
         }
+
+        if (isTelegramContext){
+          if (!initData){
+            API.clearToken();
+            toggleAuthCard(true, "Нет initData от Telegram. Закройте и откройте приложение из Telegram заново.");
+            setStatus("Нет данных авторизации", "error");
+            return false;
+          }
+          // В Telegram всегда переавторизуемся по initData, чтобы не использовать
+          // токен от другого Telegram-аккаунта из localStorage.
+          const res = await API.post("/api/auth/telegram", { initData });
+          if (res?.token) API.setToken(res.token);
+          if (res?.user) applyUser(res.user);
+        } else if (!initData && !API.token){
+          toggleAuthCard(true, "Откройте приложение через Telegram или используйте ссылку входа.");
+          setStatus("Нет данных авторизации", "error");
+          return false;
+        }
+        if (initData){
+          // Всегда переавторизуемся по initData, чтобы не использовать токен
+          // от другого Telegram-аккаунта из localStorage.
+          const res = await API.post("/api/auth/telegram", { initData });
+          if (res?.token) API.setToken(res.token);
+          if (res?.user) applyUser(res.user);
+        }
+        await loadMe();
+        toggleAuthCard(false);
+        return true;
+      }catch(err){
+        API.clearToken();
+        toggleAuthCard(true, err?.message || "Нет доступа");
+        setStatus("Ошибка", "error");
+        return false;
       }
-      toggleLoginCard(true);
-      setStatus("Введите логин и пароль", "error");
-      return false;
+
+    }
+
+    function wirePullToRefresh(){
+      const minPullDistance = 90;
+      const maxHorizontalDrift = 64;
+      let touchStartY = 0;
+      let touchStartX = 0;
+      let isTracking = false;
+      let isRefreshing = false;
+
+      const onRefresh = ()=>{
+        if (isRefreshing) return;
+        isRefreshing = true;
+        ensureAuth()
+          .then((ok)=> ok ? loadList() : Promise.resolve())
+          .then(()=> toast("Обновлено"))
+          .catch((e)=> toast(String(e.message || e)))
+          .finally(()=>{ isRefreshing = false; });
+      };
+
+      window.addEventListener("touchstart", (e)=>{
+        if (e.touches.length !== 1 || window.scrollY > 0) {
+          isTracking = false;
+          return;
+        }
+        const touch = e.touches[0];
+        touchStartY = touch.clientY;
+        touchStartX = touch.clientX;
+        isTracking = true;
+      }, { passive: true });
+
+      window.addEventListener("touchmove", (e)=>{
+        if (!isTracking || e.touches.length !== 1) return;
+        const touch = e.touches[0];
+        const deltaY = touch.clientY - touchStartY;
+        const deltaX = Math.abs(touch.clientX - touchStartX);
+        if (deltaY <= 0 || deltaX > maxHorizontalDrift) {
+          isTracking = false;
+          return;
+        }
+        if (deltaY >= minPullDistance) {
+          isTracking = false;
+          onRefresh();
+        }
+      }, { passive: true });
+
+      window.addEventListener("touchend", ()=>{
+        isTracking = false;
+      }, { passive: true });
     }
 
 
@@ -1338,41 +1508,19 @@
     $("sigSend").addEventListener("click", ()=> signCurrent().catch(e=> toast(String(e.message||e))));
     $("refuseBtn").addEventListener("click", ()=> refuseCurrent().catch(e=> toast(String(e.message||e))));
 
-    $("refreshBtn").addEventListener("click", ()=>{
-      ensureAuth()
-        .then((ok)=> ok ? loadList() : Promise.resolve())
-        .then(()=> toast("Обновлено"))
-        .catch(e=> toast(String(e.message||e)));
-    });
-
-    $("loginBtn").addEventListener("click", async ()=>{
-      try{
-        const res = await authLogin();
-        if (!res || !res.token) return;
-        API.setToken(res.token);
-        if (res.user){
-          applyUser(res.user);
-        } else {
-          await loadMe();
-        }
-        toggleLoginCard(false);
-        setStatus("Готово", "success");
-        await loadList();
-      }catch(e){
-        setLoginError(String(e.message || e));
-        setStatus("Ошибка", "error");
-      }
-    });
-
-
     $("themeBtn").addEventListener("click", ()=>{
       const curTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
       applyTheme(curTheme === "dark" ? "light" : "dark");
+    });
+    $("lightThemeBtn").addEventListener("click", ()=>{
+      applyTheme("light");
     });
 
     (async function init(){
       initTheme();
       Pad.init();
+      wirePullToRefresh();
+      loadStoredToken();
 
       State.dropdowns.account = makeDropdown("accountSel", "accountLabel");
       State.dropdowns.scope = makeDropdown("scopeSel", "scopeLabel");
