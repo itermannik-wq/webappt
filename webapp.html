@@ -8658,7 +8658,7 @@
       });
       $("#diagReportBtn")?.addEventListener("click", ()=>{
         if (!State.diagRunId) return;
-        window.open(`${API.baseUrl}/admin/diagnostics/runs/${State.diagRunId}/report`, "_blank", "noopener");
+        openDownload(`${API.baseUrl}/admin/diagnostics/runs/${State.diagRunId}/report`);
       });
       $("#diagCheckTelegram")?.addEventListener("change", (e)=>{
         $("#diagTelegramTargetId").style.display = e.target.checked ? "block" : "none";
