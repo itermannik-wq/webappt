@@ -5128,6 +5128,7 @@ async def _diag_db_connect(ctx: DiagnosticsContext) -> Dict[str, Any]:
 
 async def _diag_db_foreign_keys(ctx: DiagnosticsContext) -> Dict[str, Any]:
     with sqlite3.connect(ctx.selected_db_path()) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
         enabled = int(conn.execute("PRAGMA foreign_keys;").fetchone()[0])
     if enabled == 1:
         return {"status": "success", "message_ru": "foreign_keys включен", "details": {}}
@@ -5252,7 +5253,9 @@ async def _diag_scheduler_present(ctx: DiagnosticsContext) -> Dict[str, Any]:
         return {"status": "skipped", "message_ru": "Проверка планировщика отключена", "details": {}}
     reschedule_jobs()
     jobs = [j.id for j in scheduler.get_jobs()]
-    expected = {"sunday_report", "month_report", "daily_expenses"}
+    expected = {"job_sunday_report", "job_backup_daily"}
+    if int(get_settings().get("daily_expenses_enabled") or 0) == 1:
+        expected.add("job_daily_expenses")
     missing = sorted(expected - set(jobs))
     if missing:
         return {"status": "warn", "message_ru": "Не все задачи планировщика зарегистрированы", "details": {"missing": missing}}
