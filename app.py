@@ -5457,7 +5457,7 @@ async def api_diagnostics_run(
         INSERT INTO diagnostic_runs (created_at, created_by_user_id, created_by, suite, mode, status, options_json)
         VALUES (?, ?, ?, ?, ?, 'queued', ?);
         """,
-        (now, int(u["id"]), str(u.get("name") or u.get("telegram_id") or u["id"]), suite, mode, json.dumps(body.options.model_dump(), ensure_ascii=False)),
+        (now, int(u["id"]), str(u["name"] or u["telegram_id"] or u["id"]), suite, mode, json.dumps(body.options.model_dump(), ensure_ascii=False)),
     )
     DIAG_CANCEL_EVENTS[run_id] = asyncio.Event()
     DIAG_RUNNING_TASKS[run_id] = asyncio.create_task(_run_diagnostics(run_id, suite, mode, body.options))
