@@ -3079,21 +3079,37 @@
                         </div>
                         <div class="field">
                           <label>Режим</label>
-                          <select id="diagMode" class="input">
-                            <option value="safe">SAFE</option>
-                            <option value="sandbox">SANDBOX</option>
-                            <option value="live">LIVE</option>
-                          </select>
+                          <div class="row" style="gap:12px;flex-wrap:wrap;">
+                            <label><input name="diagMode" type="radio" value="safe" checked/> SAFE</label>
+                            <label><input name="diagMode" type="radio" value="sandbox"/> SANDBOX</label>
+                            <details>
+                              <summary>Опасные действия</summary>
+                              <label style="display:block;margin-top:6px;"><input name="diagMode" type="radio" value="live"/> LIVE (возможны внешние действия)</label>
+                            </details>
+                          </div>
                         </div>
                       </div>
-                      <label><input id="diagTelegramSend" type="checkbox" /> Проверить отправку в Telegram</label>
-                      <label><input id="diagBackupFull" type="checkbox" /> Проверить full backup</label>
+                      <label><input id="diagCheckPng" type="checkbox" checked /> Проверить генерацию PNG</label>
+                      <label><input id="diagCheckCsv" type="checkbox" checked /> Проверить экспорт CSV</label>
+                      <label><input id="diagCheckXlsx" type="checkbox" /> Проверить экспорт Excel</label>
+                      <label><input id="diagCheckBackups" type="checkbox" checked /> Проверить бэкап БД</label>
+                      <label><input id="diagCheckBackupZip" type="checkbox" /> Проверить full zip бэкап</label>
+                      <label><input id="diagCheckScheduler" type="checkbox" checked /> Проверить планировщик</label>
+                      <label><input id="diagCheckTelegram" type="checkbox" /> Проверить Telegram</label>
+                      <input id="diagTelegramTargetId" class="input" type="number" placeholder="telegram_target_id" style="display:none;" />
+                      <label><input id="diagFailFast" type="checkbox" checked /> Fail-fast для критичных шагов</label>
+                      <div class="field">
+                        <label>Таймаут прогона (сек)</label>
+                        <input id="diagTimeoutSec" class="input" type="number" min="10" max="1800" value="120" />
+                      </div>
                       <div class="row" style="gap:10px; flex-wrap:wrap;">
                         <button id="diagRunBtn" class="btn" type="button"><span class="icon">play_arrow</span> Запустить</button>
                         <button id="diagCancelBtn" class="btn ghost" type="button"><span class="icon">stop</span> Остановить</button>
+                        <button id="diagReportBtn" class="btn ghost" type="button">Открыть отчёт</button>
                         <button id="diagDownloadJsonBtn" class="btn small" type="button">JSON</button>
                         <button id="diagDownloadHtmlBtn" class="btn small" type="button">HTML</button>
                       </div>
+                      <progress id="diagProgress" max="100" value="0" style="width:100%;"></progress>
                       <div id="diagCurrentStatus" class="tiny muted2">Нет активного прогона.</div>
                       <div id="diagSteps" class="list" style="margin-top:8px;"></div>
                       <div class="spacer12"></div>
@@ -6793,8 +6809,8 @@
         row.className = "card";
         row.style.padding = "10px";
         const st = String(step.status || "").toLowerCase();
-        const icon = st === "success" ? "✅" : (st === "warn" ? "⚠️" : (st === "fail" ? "❌" : (st === "running" ? "⏳" : "•")));
-        row.innerHTML = `<div class="bold">${icon} ${escapeHtml(step.title || step.key || "step")}</div><div class="tiny muted2">${escapeHtml(step.message || "")}</div>`;
+        const icon = st === "success" ? "✅" : (st === "warn" ? "⚠️" : (st === "fail" ? "❌" : (st === "running" ? "⏳" : (st === "canceled" ? "⛔" : "•"))));
+        row.innerHTML = `<div class="bold">${icon} ${escapeHtml(step.title_ru || step.title || step.key || "step")}</div><div class="tiny muted2">${escapeHtml(step.category || "")} • ${escapeHtml(step.message_ru || step.message || "")}</div><details><summary>Подробнее</summary><div class="tiny">Что проверяли: ${escapeHtml(step.desc_ru || "")}</div><div class="tiny">Итог: ${escapeHtml(step.message_ru || "")}</div><div class="tiny">Рекомендация: ${escapeHtml(step.fix_ru || "")}</div><details><summary>Показать тех. детали</summary><pre>${escapeHtml(JSON.stringify(step.details || {}, null, 2))}</pre></details></details>`;
         wrap.appendChild(row);
       });
     }
@@ -6811,7 +6827,9 @@
         row.addEventListener("click", async ()=>{
           const data = await API.get(`/api/admin/diagnostics/runs/${run.id}`);
           State.diagRunId = run.id;
-          $("#diagCurrentStatus").textContent = `Run #${run.id}: ${data.status}`;
+          const r = data.run || {};
+          $("#diagCurrentStatus").textContent = `Прогон #${run.id}: ${r.status || "unknown"}`;
+          $("#diagProgress").value = Number(r.progress || 0);
           renderDiagnosticsSteps(data.steps || []);
         });
         wrap.appendChild(row);
@@ -6822,9 +6840,11 @@
       if (!State.diagRunId) return;
       try{
         const data = await API.get(`/api/admin/diagnostics/runs/${State.diagRunId}`);
-        $("#diagCurrentStatus").textContent = `Run #${State.diagRunId}: ${data.status}`;
+        const run = data.run || {};
+        $("#diagCurrentStatus").textContent = `Прогон #${State.diagRunId}: ${run.status || "unknown"} • ${run.current_step_ru || ""}`;
+        $("#diagProgress").value = Number(run.progress || 0);
         renderDiagnosticsSteps(data.steps || []);
-        if (data.status !== "running" && data.status !== "queued"){
+        if (run.status !== "running" && run.status !== "queued"){
           clearInterval(State.diagPollTimer);
           State.diagPollTimer = null;
           await loadDiagnosticsRuns();
@@ -6837,19 +6857,27 @@
 
     async function runDiagnostics(){
       const suite = $("#diagSuite")?.value || "quick";
-      const mode = $("#diagMode")?.value || "safe";
+      const mode = document.querySelector('input[name="diagMode"]:checked')?.value || "safe";
+      const timeout = Number($("#diagTimeoutSec")?.value || 120);
       const body = {
         suite,
         mode,
         options: {
-          telegram_send_test: !!$("#diagTelegramSend")?.checked,
-          backup_full: !!$("#diagBackupFull")?.checked,
-          timeout_sec: 120
+          check_png: !!$("#diagCheckPng")?.checked,
+          check_csv: !!$("#diagCheckCsv")?.checked,
+          check_xlsx: !!$("#diagCheckXlsx")?.checked,
+          check_backups: !!$("#diagCheckBackups")?.checked,
+          check_backup_zip: !!$("#diagCheckBackupZip")?.checked,
+          check_scheduler: !!$("#diagCheckScheduler")?.checked,
+          check_telegram: !!$("#diagCheckTelegram")?.checked,
+          telegram_target_id: $("#diagCheckTelegram")?.checked ? Number($("#diagTelegramTargetId")?.value || 0) || null : null,
+          timeout_sec: timeout,
+          fail_fast: !!$("#diagFailFast")?.checked
         }
       };
       const res = await API.post("/api/admin/diagnostics/run", body);
       State.diagRunId = res.run_id;
-      $("#diagCurrentStatus").textContent = `Run #${res.run_id}: running`;
+      $("#diagCurrentStatus").textContent = `Прогон #${res.run_id}: running`;
       clearInterval(State.diagPollTimer);
       State.diagPollTimer = setInterval(pollDiagnosticsRun, 1500);
       await pollDiagnosticsRun();
@@ -8627,6 +8655,13 @@
       $("#diagDownloadHtmlBtn")?.addEventListener("click", ()=>{
         if (!State.diagRunId) return;
         openDownload(`${API.baseUrl}/api/admin/diagnostics/runs/${State.diagRunId}/download?format=html`);
+      });
+      $("#diagReportBtn")?.addEventListener("click", ()=>{
+        if (!State.diagRunId) return;
+        window.open(`${API.baseUrl}/admin/diagnostics/runs/${State.diagRunId}/report`, "_blank", "noopener");
+      });
+      $("#diagCheckTelegram")?.addEventListener("change", (e)=>{
+        $("#diagTelegramTargetId").style.display = e.target.checked ? "block" : "none";
       });
     }
 

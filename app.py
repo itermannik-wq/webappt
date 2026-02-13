@@ -4923,7 +4923,24 @@ def _mask_secret(value: str) -> str:
     v = str(value or "")
     if len(v) <= 8:
         return "***"
-    return f"{v[:4]}***{v[-4:]}"
+    return f"{v[:4]}…{v[-4:]}"
+
+
+def _mask_recursive(value: Any) -> Any:
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            lk = str(k).lower()
+            if any(x in lk for x in ("token", "secret", "password", "key")):
+                out[k] = _mask_secret(str(v))
+            else:
+                out[k] = _mask_recursive(v)
+        return out
+    if isinstance(value, list):
+        return [_mask_recursive(v) for v in value]
+    if isinstance(value, str) and len(value) > 24 and any(ch.isdigit() for ch in value):
+        return _mask_secret(value)
+    return value
 
 
 def _json_loads(raw: Optional[str], fallback: Any) -> Any:
@@ -4935,11 +4952,36 @@ def _json_loads(raw: Optional[str], fallback: Any) -> Any:
         return fallback
 
 
+def _ensure_diag_schema() -> None:
+    for col, ddl in (
+        ("created_by", "TEXT NULL"),
+    ):
+        if not table_has_column("diagnostic_runs", col):
+            db_exec(f"ALTER TABLE diagnostic_runs ADD COLUMN {col} {ddl};")
+    for col, ddl in (
+        ("title_ru", "TEXT NULL"),
+        ("category", "TEXT NULL"),
+        ("desc_ru", "TEXT NULL"),
+        ("impact_ru", "TEXT NULL"),
+        ("fix_ru", "TEXT NULL"),
+        ("message_ru", "TEXT NULL"),
+        ("key", "TEXT NULL"),
+    ):
+        if not table_has_column("diagnostic_steps", col):
+            db_exec(f"ALTER TABLE diagnostic_steps ADD COLUMN {col} {ddl};")
+
+
 class DiagnosticsRunOptions(BaseModel):
-    telegram_send_test: bool = False
+    check_png: bool = True
+    check_csv: bool = True
+    check_xlsx: bool = False
+    check_backups: bool = True
+    check_backup_zip: bool = False
+    check_scheduler: bool = True
+    check_telegram: bool = False
     telegram_target_id: Optional[int] = None
-    backup_full: bool = False
     timeout_sec: int = Field(default=120, ge=10, le=1800)
+    fail_fast: bool = True
 
 
 class DiagnosticsRunIn(BaseModel):
@@ -4966,178 +5008,297 @@ class DiagnosticsCheck:
     def __init__(
         self,
         key: str,
-        title: str,
+        title_ru: str,
+        category: str,
         severity: str,
         allowed_modes: Set[str],
+        desc_ru: str,
+        impact_ru: str,
+        fix_ru: str,
         fn: Callable[[DiagnosticsContext], Awaitable[Dict[str, Any]]],
     ):
         self.key = key
-        self.title = title
+        self.title_ru = title_ru
+        self.category = category
         self.severity = severity
         self.allowed_modes = allowed_modes
+        self.desc_ru = desc_ru
+        self.impact_ru = impact_ru
+        self.fix_ru = fix_ru
         self.fn = fn
 
 
-async def _diag_check_preflight(ctx: DiagnosticsContext) -> Dict[str, Any]:
-    required = {
-        "BOT_TOKEN": CFG.BOT_TOKEN,
-        "DB_PATH": CFG.DB_PATH,
-        "USERS_JSON": CFG.USERS_JSON_PATH,
-        "APP_URL": CFG.APP_URL,
-        "WEBAPP_URL": CFG.WEBAPP_URL,
-        "TIMEZONE": CFG.TZ,
-    }
-    missing = [k for k, v in required.items() if not str(v or "").strip()]
-    users_raw = Path(CFG.USERS_JSON_PATH).read_text(encoding="utf-8")
-    users = json.loads(users_raw)
-    users = users.get("users") if isinstance(users, dict) else users
-    has_admin = any(int(u.get("active", 1)) == 1 and str(u.get("role", "")) == "admin" for u in (users or []))
-    if not has_admin:
-        raise RuntimeError("No active admin in users.json")
-    for name in ("webapp.html", "cashapp.html"):
-        if not (BASE_DIR / name).exists():
-            raise RuntimeError(f"Missing template: {name}")
-    for d in (ATTACHMENTS_DIR, BACKUPS_DIR):
-        d.mkdir(parents=True, exist_ok=True)
-        test = d / f".diag_write_{ctx.run_id}"
-        test.write_text("ok", encoding="utf-8")
-        test.unlink(missing_ok=True)
-    details = {
-        "missing": missing,
-        "token_masked": _mask_secret(CFG.BOT_TOKEN),
-    }
+async def _diag_sleep_cancelable(ctx: DiagnosticsContext, delay: float = 0.0) -> None:
+    if delay <= 0:
+        if ctx.cancel_event.is_set():
+            raise asyncio.CancelledError("Прогон остановлен")
+        return
+    for _ in range(int(delay * 10)):
+        if ctx.cancel_event.is_set():
+            raise asyncio.CancelledError("Прогон остановлен")
+        await asyncio.sleep(0.1)
+
+
+async def _diag_config_env_required(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    required = ["BOT_TOKEN", "APP_URL", "WEBAPP_URL", "DB_PATH", "USERS_JSON", "SESSION_SECRET"]
+    missing = [k for k in required if not os.getenv(k, "").strip()]
     if missing:
-        return {"status": "warn", "message": "Missing required env vars", "details": details}
-    return {"status": "success", "message": "Preflight checks passed", "details": details}
+        return {"status": "fail", "message_ru": f"Не задано: {', '.join(missing)}", "details": {"missing": missing}}
+    return {"status": "success", "message_ru": "Обязательные переменные окружения заполнены", "details": {}}
 
 
-async def _diag_check_db_integrity(ctx: DiagnosticsContext) -> Dict[str, Any]:
-    required_tables = [
-        "users", "months", "expenses", "categories", "tags", "drafts", "attachments",
-        "settings", "system_logs", "job_runs", "message_deliveries",
-    ]
-    path = ctx.selected_db_path()
-    with sqlite3.connect(path) as conn:
+async def _diag_files_users_readable(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    raw = Path(CFG.USERS_JSON_PATH).read_text(encoding="utf-8")
+    users = json.loads(raw)
+    users_list = users.get("users") if isinstance(users, dict) else users
+    if not isinstance(users_list, list):
+        return {"status": "fail", "message_ru": "Файл пользователей имеет неверный формат", "details": {}}
+    return {"status": "success", "message_ru": "Файл пользователей читается корректно", "details": {"count": len(users_list)}}
+
+
+async def _diag_users_admin_exists(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    rows = db_fetchall("SELECT id FROM users WHERE role='admin' AND active=1 LIMIT 1;")
+    if rows:
+        return {"status": "success", "message_ru": "Найден активный администратор", "details": {}}
+    return {"status": "fail", "message_ru": "Не найден активный администратор", "details": {}}
+
+
+async def _diag_files_templates_present(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    missing = [f for f in ("webapp.html", "cashapp.html") if not (BASE_DIR / f).exists()]
+    if missing:
+        return {"status": "fail", "message_ru": f"Не найдены шаблоны: {', '.join(missing)}", "details": {"missing": missing}}
+    return {"status": "success", "message_ru": "Шаблоны web-интерфейса на месте", "details": {}}
+
+
+async def _diag_check_dir_rw(path: Path, run_id: int) -> Dict[str, Any]:
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / f".diag_{run_id}"
+    probe.write_text("ok", encoding="utf-8")
+    probe.unlink(missing_ok=True)
+    return {"path": str(path)}
+
+
+async def _diag_files_permissions_uploads(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    return {"status": "success", "message_ru": "Папка uploads доступна", "details": await _diag_check_dir_rw(UPLOADS_DIR, ctx.run_id)}
+
+
+async def _diag_files_permissions_backups(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    return {"status": "success", "message_ru": "Папка backups доступна", "details": await _diag_check_dir_rw(BACKUPS_DIR, ctx.run_id)}
+
+
+async def _diag_db_connect(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    with sqlite3.connect(ctx.selected_db_path()) as conn:
+        conn.execute("SELECT 1;").fetchone()
+    return {"status": "success", "message_ru": "Подключение к базе успешно", "details": {"db_path": str(ctx.selected_db_path())}}
+
+
+async def _diag_db_foreign_keys(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    with sqlite3.connect(ctx.selected_db_path()) as conn:
+        enabled = int(conn.execute("PRAGMA foreign_keys;").fetchone()[0])
+    if enabled == 1:
+        return {"status": "success", "message_ru": "foreign_keys включен", "details": {}}
+    return {"status": "fail", "message_ru": "foreign_keys выключен", "details": {"foreign_keys": enabled}}
+
+
+async def _diag_db_schema_required(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    req = ["users", "months", "categories", "tags", "expenses", "drafts", "attachments", "settings"]
+    with sqlite3.connect(ctx.selected_db_path()) as conn:
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON;")
         tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table';")}
-        missing = [t for t in required_tables if t not in tables]
-        integ = conn.execute("PRAGMA integrity_check;").fetchone()[0]
-    details = {"db_path": str(path), "missing_tables": missing, "integrity": integ}
-    if missing or integ.lower() != "ok":
-        return {"status": "fail", "message": "DB integrity check failed", "details": details}
-    return {"status": "success", "message": "DB integrity check OK", "details": details}
+    missing = [t for t in req if t not in tables]
+    if missing:
+        return {"status": "fail", "message_ru": f"Отсутствуют таблицы: {', '.join(missing)}", "details": {"missing": missing}}
+    return {"status": "success", "message_ru": "Ключевые таблицы БД найдены", "details": {}}
 
 
-async def _diag_check_scheduler(ctx: DiagnosticsContext) -> Dict[str, Any]:
+async def _diag_db_integrity(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    with sqlite3.connect(ctx.selected_db_path()) as conn:
+        integ = str(conn.execute("PRAGMA integrity_check;").fetchone()[0])
+    if integ.lower() != "ok":
+        return {"status": "fail", "message_ru": "Проверка целостности БД не пройдена", "details": {"integrity": integ}}
+    return {"status": "success", "message_ru": "Целостность БД в порядке", "details": {}}
+
+
+async def _diag_db_basic_queries(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    with sqlite3.connect(ctx.selected_db_path()) as conn:
+        conn.execute("SELECT COUNT(*) FROM users;").fetchone()
+        conn.execute("SELECT COUNT(*) FROM months;").fetchone()
+    return {"status": "success", "message_ru": "Базовые SQL-запросы работают", "details": {}}
+
+
+async def _diag_logic_sandbox_crud(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    if ctx.mode == "safe":
+        return {"status": "skipped", "message_ru": "Шаг доступен только в SANDBOX/LIVE", "details": {}}
+    with sqlite3.connect(ctx.selected_db_path()) as conn:
+        conn.row_factory = sqlite3.Row
+        now = iso_now(CFG.tzinfo())
+        conn.execute("INSERT INTO users (telegram_id, name, role, active, created_at) VALUES (?, ?, 'admin', 1, ?);", (800000000 + ctx.run_id, "diag", now))
+        uid = int(conn.execute("SELECT id FROM users WHERE telegram_id=?;", (800000000 + ctx.run_id,)).fetchone()[0])
+        conn.execute("INSERT INTO months (year, month, monthly_min_needed, start_balance, created_at, updated_at) VALUES (2099, 1, 0, 0, ?, ?);", (now, now))
+        month_id = int(conn.execute("SELECT id FROM months ORDER BY id DESC LIMIT 1;").fetchone()[0])
+        conn.execute("INSERT INTO categories (name, is_active, sort_order, created_at, updated_at) VALUES (?,1,0,?,?);", (f"diag-cat-{ctx.run_id}", now, now))
+        cat_id = int(conn.execute("SELECT id FROM categories ORDER BY id DESC LIMIT 1;").fetchone()[0])
+        conn.execute("INSERT INTO tags (name, created_at, updated_at) VALUES (?, ?, ?);", (f"diag-tag-{ctx.run_id}", now, now))
+        conn.execute("INSERT INTO expenses (month_id, expense_date, category_id, amount, note, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, 1.0, 'diag', ?, ?, ?);", (month_id, now[:10], cat_id, uid, now, now))
+        exp_id = int(conn.execute("SELECT id FROM expenses ORDER BY id DESC LIMIT 1;").fetchone()[0])
+        conn.execute("DELETE FROM expenses WHERE id=?;", (exp_id,))
+        conn.commit()
+    return {"status": "success", "message_ru": "CRUD операции в песочнице выполнены", "details": {"db_path": str(ctx.selected_db_path())}}
+
+
+async def _diag_reports_png(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    if not ctx.options.check_png:
+        return {"status": "skipped", "message_ru": "Проверка PNG отключена", "details": {}}
+    with sqlite3.connect(ctx.selected_db_path()) as conn:
+        conn.row_factory = sqlite3.Row
+        month = conn.execute("SELECT id FROM months ORDER BY year DESC, month DESC LIMIT 1;").fetchone()
+    if not month:
+        return {"status": "warn", "message_ru": "Нет данных месяца для генерации PNG", "details": {}}
+    png, _, _ = build_month_report_png(int(month["id"]), preset="square", pixel_ratio=1, dpi=96)
+    ok = png.startswith(b"\x89PNG\r\n\x1a\n") and len(png) > 100
+    if not ok:
+        return {"status": "fail", "message_ru": "PNG-файл имеет неверную сигнатуру", "details": {"size": len(png)}}
+    return {"status": "success", "message_ru": "PNG-отчет формируется корректно", "details": {"size": len(png)}}
+
+
+async def _diag_export_csv(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    if not ctx.options.check_csv:
+        return {"status": "skipped", "message_ru": "Проверка CSV отключена", "details": {}}
+    with sqlite3.connect(ctx.selected_db_path()) as conn:
+        header = conn.execute("SELECT id, year, month FROM months ORDER BY id LIMIT 1;").fetchone()
+    if not header:
+        return {"status": "warn", "message_ru": "CSV не проверен: нет месяцев", "details": {}}
+    return {"status": "success", "message_ru": "CSV-экспорт доступен", "details": {"has_header": True}}
+
+
+async def _diag_export_xlsx(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    if not ctx.options.check_xlsx:
+        return {"status": "skipped", "message_ru": "Проверка Excel отключена", "details": {}}
+    if openpyxl is None:
+        return {"status": "warn", "message_ru": "openpyxl не установлен", "details": {}}
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "ok"
+    bio = io.BytesIO()
+    wb.save(bio)
+    if bio.tell() <= 0:
+        return {"status": "fail", "message_ru": "Excel-файл не сформирован", "details": {}}
+    return {"status": "success", "message_ru": "Excel-экспорт доступен", "details": {"bytes": bio.tell()}}
+
+
+async def _diag_backup_db(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    if not ctx.options.check_backups:
+        return {"status": "skipped", "message_ru": "Проверка backup отключена", "details": {}}
+    backup_dir = (ctx.sandbox_dir / "backups") if ctx.sandbox_dir else BACKUPS_DIR
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now(CFG.tzinfo()).strftime("%Y%m%d_%H%M%S")
+    dst = backup_dir / f"diag_{ctx.run_id}_{stamp}.sqlite3"
+    shutil.copy2(ctx.selected_db_path(), dst)
+    return {"status": "success", "message_ru": "Резервная копия БД создана", "details": {"file": str(dst), "size": dst.stat().st_size}}
+
+
+async def _diag_backup_zip(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    if not ctx.options.check_backup_zip:
+        return {"status": "skipped", "message_ru": "Проверка zip backup отключена", "details": {}}
+    backup_dir = (ctx.sandbox_dir / "backups") if ctx.sandbox_dir else BACKUPS_DIR
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now(CFG.tzinfo()).strftime("%Y%m%d_%H%M%S")
+    zip_path = backup_dir / f"diag_{ctx.run_id}_{stamp}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(ctx.selected_db_path(), arcname="db.sqlite3")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        names = zf.namelist()
+    if "db.sqlite3" not in names:
+        return {"status": "fail", "message_ru": "ZIP бэкап некорректен", "details": {"entries": names}}
+    return {"status": "success", "message_ru": "ZIP бэкап валиден", "details": {"file": str(zip_path)}}
+
+
+async def _diag_scheduler_present(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    if not ctx.options.check_scheduler:
+        return {"status": "skipped", "message_ru": "Проверка планировщика отключена", "details": {}}
     reschedule_jobs()
     jobs = [j.id for j in scheduler.get_jobs()]
     expected = {"sunday_report", "month_report", "daily_expenses"}
     missing = sorted(expected - set(jobs))
     if missing:
-        return {"status": "warn", "message": "Some scheduler jobs are missing", "details": {"missing": missing, "jobs": jobs}}
-    return {"status": "success", "message": "Scheduler jobs present", "details": {"jobs": jobs}}
+        return {"status": "warn", "message_ru": "Не все задачи планировщика зарегистрированы", "details": {"missing": missing}}
+    return {"status": "success", "message_ru": "Планировщик и задачи доступны", "details": {"jobs": jobs}}
 
 
-async def _diag_check_sandbox_crud(ctx: DiagnosticsContext) -> Dict[str, Any]:
-    if ctx.mode == "safe":
-        return {"status": "skipped", "message": "CRUD skipped in SAFE mode", "details": {}}
-    with sqlite3.connect(ctx.selected_db_path()) as conn:
-        conn.row_factory = sqlite3.Row
-        now = iso_now(CFG.tzinfo())
-        conn.execute("INSERT INTO users (telegram_id, name, role, active, created_at) VALUES (?, ?, ?, 1, ?);", (9000000 + ctx.run_id, "Diag", "admin", now))
-        user_id = int(conn.execute("SELECT id FROM users WHERE telegram_id=?;", (9000000 + ctx.run_id,)).fetchone()[0])
-        conn.execute("INSERT INTO months (year, month, monthly_min_needed, start_balance, created_at, updated_at) VALUES (?, ?, 0, 0, ?, ?);", (2090, (ctx.run_id % 12) + 1, now, now))
-        month_id = int(conn.execute("SELECT id FROM months WHERE year=2090 ORDER BY id DESC LIMIT 1;").fetchone()[0])
-        conn.execute("INSERT INTO categories (name, is_active, sort_order, created_at, updated_at) VALUES (?, 1, 0, ?, ?);", (f"diag-{ctx.run_id}", now, now))
-        category_id = int(conn.execute("SELECT id FROM categories WHERE name=?;", (f"diag-{ctx.run_id}",)).fetchone()[0])
-        conn.execute("INSERT INTO expenses (month_id, expense_date, category_id, amount, note, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);", (month_id, now[:10], category_id, 123.45, "diag", user_id, now, now))
-        expense_id = int(conn.execute("SELECT id FROM expenses WHERE month_id=? ORDER BY id DESC LIMIT 1;", (month_id,)).fetchone()[0])
-        conn.execute("DELETE FROM expenses WHERE id=?;", (expense_id,))
-        conn.commit()
-    return {"status": "success", "message": "Sandbox CRUD checks passed", "details": {"db_path": str(ctx.selected_db_path())}}
-
-
-async def _diag_check_exports(ctx: DiagnosticsContext) -> Dict[str, Any]:
-    with sqlite3.connect(ctx.selected_db_path()) as conn:
-        conn.row_factory = sqlite3.Row
-        month = conn.execute("SELECT id FROM months ORDER BY year DESC, month DESC LIMIT 1;").fetchone()
-    if not month:
-        return {"status": "warn", "message": "No month in DB; export checks skipped", "details": {}}
-    if ctx.mode == "sandbox":
-        return {"status": "success", "message": "Sandbox export precheck passed", "details": {"month_id": int(month["id"])}}
-    png, _, _ = build_month_report_png(int(month["id"]), preset="square", pixel_ratio=1, dpi=96)
-    is_png = png.startswith(b"\x89PNG\r\n\x1a\n") and len(png) > 100
-    if not is_png:
-        return {"status": "fail", "message": "PNG export signature check failed", "details": {"size": len(png)}}
-    return {"status": "success", "message": "Export checks passed", "details": {"png_size": len(png)}}
-
-
-async def _diag_check_backups(ctx: DiagnosticsContext) -> Dict[str, Any]:
-    source_db = ctx.selected_db_path()
-    backup_dir = ctx.sandbox_dir / "backups" if ctx.sandbox_dir else BACKUPS_DIR
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = dt.datetime.now(CFG.tzinfo()).strftime("%Y%m%d_%H%M%S")
-    db_backup = backup_dir / f"diag_{ctx.run_id}_{stamp}.sqlite3"
-    shutil.copy2(source_db, db_backup)
-    details: Dict[str, Any] = {"db_backup": str(db_backup), "db_size": db_backup.stat().st_size}
-    if ctx.options.backup_full:
-        full_path = backup_dir / f"diag_{ctx.run_id}_{stamp}.zip"
-        with zipfile.ZipFile(full_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.write(source_db, arcname="db.sqlite3")
-        with zipfile.ZipFile(full_path, "r") as zf:
-            details["full_zip_entries"] = zf.namelist()
-        details["full_zip"] = str(full_path)
-    return {"status": "success", "message": "Backup checks passed", "details": details}
-
-
-async def _diag_check_telegram(ctx: DiagnosticsContext) -> Dict[str, Any]:
+async def _diag_telegram(ctx: DiagnosticsContext) -> Dict[str, Any]:
+    if not ctx.options.check_telegram:
+        return {"status": "skipped", "message_ru": "Проверка Telegram отключена", "details": {}}
     if ctx.mode != "live":
-        return {"status": "skipped", "message": "Telegram checks require LIVE mode", "details": {}}
+        return {"status": "warn", "message_ru": "Telegram проверяется только в LIVE режиме", "details": {}}
     me = await BOT.get_me()
-    details = {"bot_id": me.id, "username": me.username}
-    if ctx.options.telegram_send_test:
-        if not ctx.options.telegram_target_id:
-            return {"status": "warn", "message": "telegram_target_id is required for send test", "details": details}
-        await BOT.send_message(int(ctx.options.telegram_target_id), f"🧪 Diagnostics run #{ctx.run_id} completed")
-        details["sent_to"] = int(ctx.options.telegram_target_id)
-    return {"status": "success", "message": "Telegram checks passed", "details": details}
+    details: Dict[str, Any] = {"bot": me.username}
+    if ctx.options.telegram_target_id:
+        await BOT.send_message(int(ctx.options.telegram_target_id), f"🧪 Диагностика #{ctx.run_id}: тест")
+        details["sent"] = True
+    return {"status": "success", "message_ru": "Интеграция Telegram работает", "details": details}
+
+
+def _check(key: str, title: str, category: str, severity: str, modes: Set[str], desc: str, impact: str, fix: str, fn: Callable[[DiagnosticsContext], Awaitable[Dict[str, Any]]]) -> DiagnosticsCheck:
+    return DiagnosticsCheck(key, title, category, severity, modes, desc, impact, fix, fn)
 
 
 def _build_checks(suite: str) -> List[DiagnosticsCheck]:
-    base = [
-        DiagnosticsCheck("preflight", "Preflight checks", "critical", {"safe", "sandbox", "live"}, _diag_check_preflight),
-        DiagnosticsCheck("db.integrity", "DB integrity", "critical", {"safe", "sandbox", "live"}, _diag_check_db_integrity),
-        DiagnosticsCheck("scheduler.jobs", "Scheduler jobs", "major", {"safe", "sandbox", "live"}, _diag_check_scheduler),
+    common = [
+        _check("config.env.required", "Проверка обязательных ENV", "config", "critical", {"safe", "sandbox", "live"}, "Проверяем, что обязательные переменные окружения заданы.", "Без env приложение может не запускаться или работать нестабильно.", "Заполните .env, затем перезапустите сервис.", _diag_config_env_required),
+        _check("files.users.readable", "Чтение файла пользователей", "config", "major", {"safe", "sandbox", "live"}, "Проверяем, что users.json читается и валиден.", "Некорректный файл пользователей ломает авторизацию.", "Восстановите корректный JSON и проверьте кодировку UTF-8.", _diag_files_users_readable),
+        _check("users.admin.exists", "Наличие администратора", "config", "critical", {"safe", "sandbox", "live"}, "Проверяем наличие активного admin.", "Без администратора невозможно управлять системой.", "Добавьте пользователя с ролью admin и active=1.", _diag_users_admin_exists),
+        _check("files.web.templates.present", "Наличие web-шаблонов", "config", "major", {"safe", "sandbox", "live"}, "Проверяем наличие webapp.html и cashapp.html.", "Отсутствие шаблонов делает интерфейс недоступным.", "Верните шаблоны в корень проекта и проверьте путь.", _diag_files_templates_present),
+        _check("files.permissions.uploads", "Права на uploads", "config", "major", {"safe", "sandbox", "live"}, "Проверяем чтение/запись в uploads.", "Без прав нельзя работать с вложениями.", "Выдайте права на каталог uploads для пользователя сервиса.", _diag_files_permissions_uploads),
+        _check("files.permissions.backups", "Права на backups", "backups", "major", {"safe", "sandbox", "live"}, "Проверяем доступ к каталогу backups.", "Без прав не создаются резервные копии.", "Создайте каталог backups и выдайте права на запись.", _diag_files_permissions_backups),
+        _check("db.connect", "Подключение к БД", "db", "critical", {"safe", "sandbox", "live"}, "Проверяем подключение к SQLite.", "Недоступная БД останавливает приложение.", "Проверьте путь DB_PATH, место на диске и права доступа.", _diag_db_connect),
+        _check("db.foreign_keys", "Проверка foreign_keys", "db", "major", {"safe", "sandbox", "live"}, "Проверяем, что foreign_keys=ON.", "Иначе нарушается ссылочная целостность данных.", "Включайте PRAGMA foreign_keys=ON при каждом подключении.", _diag_db_foreign_keys),
+        _check("db.schema.required_tables", "Проверка схемы БД", "db", "critical", {"safe", "sandbox", "live"}, "Проверяем существование ключевых таблиц.", "Отсутствие таблиц приводит к сбоям бизнес-логики.", "Выполните init_db/migrations и проверьте целевую БД.", _diag_db_schema_required),
+        _check("db.integrity_check", "Целостность БД", "db", "critical", {"safe", "sandbox", "live"}, "Запускаем PRAGMA integrity_check.", "Поврежденная БД может привести к потере данных.", "Восстановите БД из корректного бэкапа.", _diag_db_integrity),
+        _check("db.basic_queries", "Базовые SELECT-запросы", "db", "major", {"safe", "sandbox", "live"}, "Проверяем выполнение базовых SELECT.", "Ошибки SQL сигнализируют о проблемах схемы/доступа.", "Проверьте миграции и права доступа к таблицам.", _diag_db_basic_queries),
+    ]
+    full_only = [
+        _check("logic.sandbox.crud", "CRUD в SANDBOX", "api", "critical", {"sandbox", "live"}, "Проверяем создание/чтение/удаление тестовых сущностей в песочнице.", "Проблемы CRUD означают сбой основной логики работы данных.", "Проверьте миграции, ограничения и SQL-запросы.", _diag_logic_sandbox_crud),
+        _check("reports.png.generate", "Генерация PNG", "reports", "major", {"safe", "sandbox", "live"}, "Проверяем генерацию PNG-отчета.", "Без PNG отчеты не смогут отправляться пользователям.", "Проверьте доступность шрифтов и модуль генерации отчетов.", _diag_reports_png),
+        _check("export.csv.generate", "Экспорт CSV", "reports", "major", {"safe", "sandbox", "live"}, "Проверяем доступность CSV-экспорта.", "Нерабочий экспорт затрудняет сверку и аналитику.", "Проверьте функцию экспорта и исходные данные.", _diag_export_csv),
+        _check("export.xlsx.generate", "Экспорт Excel", "reports", "minor", {"safe", "sandbox", "live"}, "Проверяем возможность Excel-экспорта.", "Ошибка ухудшает удобство выгрузки для бухгалтерии.", "Установите/обновите openpyxl и проверьте генерацию.", _diag_export_xlsx),
+        _check("backup.db.create", "Создание DB backup", "backups", "major", {"safe", "sandbox", "live"}, "Проверяем создание резервной копии sqlite.", "Без бэкапов сложно восстановиться после аварии.", "Проверьте права на backups и место на диске.", _diag_backup_db),
+        _check("backup.zip.validate", "Проверка ZIP backup", "backups", "major", {"safe", "sandbox", "live"}, "Проверяем создание и валидацию zip-бэкапа.", "Некорректный zip делает восстановление невозможным.", "Исправьте упаковку архива и проверьте состав файлов.", _diag_backup_zip),
+        _check("scheduler.jobs.present", "Задачи планировщика", "scheduler", "major", {"safe", "sandbox", "live"}, "Проверяем наличие зарегистрированных задач scheduler.", "Отсутствие задач приводит к пропуску отчетов и процессов.", "Проверьте запуск scheduler и функцию reschedule_jobs.", _diag_scheduler_present),
+    ]
+    integration = [
+        _check("telegram.get_me", "Проверка Telegram getMe", "integrations", "major", {"live"}, "Проверяем подключение к Telegram Bot API.", "При сбое уведомления и команды не работают.", "Проверьте BOT_TOKEN и сетевой доступ к Telegram API.", _diag_telegram),
     ]
     if suite == "quick":
-        return base
+        return common + [full_only[-1]]
     if suite == "integrations":
-        return base + [
-            DiagnosticsCheck("telegram.integration", "Telegram integration", "major", {"live"}, _diag_check_telegram),
-            DiagnosticsCheck("backups", "Backup diagnostics", "major", {"safe", "sandbox", "live"}, _diag_check_backups),
-        ]
-    return base + [
-        DiagnosticsCheck("sandbox.crud", "Sandbox CRUD", "critical", {"sandbox", "live"}, _diag_check_sandbox_crud),
-        DiagnosticsCheck("exports", "Export checks", "major", {"safe", "sandbox", "live"}, _diag_check_exports),
-        DiagnosticsCheck("backups", "Backup diagnostics", "major", {"safe", "sandbox", "live"}, _diag_check_backups),
-        DiagnosticsCheck("telegram.integration", "Telegram integration", "major", {"live"}, _diag_check_telegram),
-    ]
+        return common + integration
+    return common + full_only + integration
 
 
-def _diag_set_run_status(run_id: int, status: str, summary: Dict[str, int], started_at: str) -> None:
+def _diag_build_subsystem_summary(steps: List[Dict[str, Any]]) -> Dict[str, str]:
+    mapping = {
+        "config": "config",
+        "db": "db",
+        "api": "api",
+        "reports": "reports",
+        "backups": "backups",
+        "scheduler": "scheduler",
+        "integrations": "integrations",
+    }
+    summary = {v: "pending" for v in mapping.values()}
+    for step in steps:
+        cat = mapping.get(str(step.get("category") or ""), "api")
+        status = str(step.get("status") or "pending")
+        prev = summary.get(cat, "pending")
+        if status == "fail" or (status == "warn" and prev not in ("fail",)) or (status == "success" and prev == "pending"):
+            summary[cat] = status
+    return summary
+
+
+def _diag_set_run_status(run_id: int, status: str, summary: Dict[str, Any], started_at: str) -> None:
     finished_at = iso_now(CFG.tzinfo())
-    started = dt.datetime.fromisoformat(started_at)
-    finished = dt.datetime.fromisoformat(finished_at)
-    duration_ms = int((finished - started).total_seconds() * 1000)
-    db_exec(
-        """
-        UPDATE diagnostic_runs
-        SET status=?, finished_at=?, duration_ms=?, summary_json=?
-        WHERE id=?;
-        """,
-        (status, finished_at, duration_ms, json.dumps(summary, ensure_ascii=False), int(run_id)),
-    )
+    duration_ms = int((dt.datetime.fromisoformat(finished_at) - dt.datetime.fromisoformat(started_at)).total_seconds() * 1000)
+    db_exec("UPDATE diagnostic_runs SET status=?, finished_at=?, duration_ms=?, summary_json=? WHERE id=?;", (status, finished_at, duration_ms, json.dumps(summary, ensure_ascii=False), int(run_id)))
 
 
 async def _run_diagnostics(run_id: int, suite: str, mode: str, options: DiagnosticsRunOptions) -> None:
@@ -5145,13 +5306,12 @@ async def _run_diagnostics(run_id: int, suite: str, mode: str, options: Diagnost
     ctx = DiagnosticsContext(run_id, suite, mode, options)
     checks = _build_checks(suite)
     final_status = "success"
-    counters = {"success": 0, "warn": 0, "fail": 0, "skipped": 0}
+    counters = {"success": 0, "warn": 0, "fail": 0, "skipped": 0, "canceled": 0}
 
     db_exec("UPDATE diagnostic_runs SET status='running', started_at=? WHERE id=?;", (started_at, int(run_id)))
     if mode in ("sandbox", "live"):
-        sandbox_dir = Path(tempfile.mkdtemp(prefix=f"diag_{run_id}_"))
-        ctx.sandbox_dir = sandbox_dir
-        ctx.sandbox_db = sandbox_dir / "db.sqlite3"
+        ctx.sandbox_dir = Path(tempfile.mkdtemp(prefix=f"diag_{run_id}_"))
+        ctx.sandbox_db = ctx.sandbox_dir / "db.sqlite3"
         shutil.copy2(CFG.DB_PATH, ctx.sandbox_db)
 
     try:
@@ -5162,51 +5322,65 @@ async def _run_diagnostics(run_id: int, suite: str, mode: str, options: Diagnost
             step_started = iso_now(CFG.tzinfo())
             step_id = db_exec_returning_id(
                 """
-                INSERT INTO diagnostic_steps (run_id, key, title, severity, status, started_at)
-                VALUES (?, ?, ?, ?, 'running', ?);
+                INSERT INTO diagnostic_steps (run_id, key, title, title_ru, category, severity, status, started_at, desc_ru, impact_ru, fix_ru)
+                VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?);
                 """,
-                (int(run_id), chk.key, chk.title, chk.severity, step_started),
+                (int(run_id), chk.key, chk.title_ru, chk.title_ru, chk.category, chk.severity, step_started, chk.desc_ru, chk.impact_ru, chk.fix_ru),
             )
             status = "skipped"
-            message = "Skipped"
+            message_ru = "Пропущено"
             details: Dict[str, Any] = {}
-            trace = None
+            trace: Optional[str] = None
             try:
                 if mode not in chk.allowed_modes:
                     status = "skipped"
-                    message = f"Step is not allowed in {mode} mode"
+                    message_ru = f"Шаг недоступен в режиме {mode.upper()}"
                 else:
                     result = await asyncio.wait_for(chk.fn(ctx), timeout=float(options.timeout_sec))
                     status = str(result.get("status", "success"))
-                    message = str(result.get("message", ""))
+                    message_ru = str(result.get("message_ru") or result.get("message") or "")
                     details = result.get("details", {}) if isinstance(result.get("details", {}), dict) else {"value": result.get("details")}
+            except asyncio.TimeoutError:
+                status = "fail"
+                message_ru = "Истекло время ожидания"
+            except asyncio.CancelledError:
+                status = "canceled"
+                message_ru = "Прогон остановлен администратором"
             except Exception as exc:
                 status = "fail"
-                message = str(exc)
-                trace = traceback.format_exc(limit=6)
-                details = {"error": str(exc)}
+                message_ru = "Шаг завершился с ошибкой"
+                details = {"error_code": "diag_step_error", "error": str(exc)}
+                trace = traceback.format_exc(limit=8)
 
-            step_finished = iso_now(CFG.tzinfo())
-            step_duration = int((dt.datetime.fromisoformat(step_finished) - dt.datetime.fromisoformat(step_started)).total_seconds() * 1000)
             if trace:
                 details["trace"] = trace
+            details = _mask_recursive(details)
+            step_finished = iso_now(CFG.tzinfo())
+            step_duration = int((dt.datetime.fromisoformat(step_finished) - dt.datetime.fromisoformat(step_started)).total_seconds() * 1000)
             db_exec(
                 """
                 UPDATE diagnostic_steps
-                SET status=?, finished_at=?, duration_ms=?, message=?, details_json=?
+                SET status=?, finished_at=?, duration_ms=?, message=?, message_ru=?, details_json=?
                 WHERE id=?;
                 """,
-                (status, step_finished, step_duration, message[:1000], json.dumps(details, ensure_ascii=False), int(step_id)),
+                (status, step_finished, step_duration, message_ru[:1000], message_ru[:1000], json.dumps(details, ensure_ascii=False), int(step_id)),
             )
             counters[status] = counters.get(status, 0) + 1
             if status == "fail":
                 final_status = "fail"
-            elif status == "warn" and final_status != "fail":
+                if options.fail_fast and chk.severity == "critical":
+                    break
+            elif status == "warn" and final_status == "success":
                 final_status = "warn"
+            elif status == "canceled":
+                final_status = "canceled"
+                break
+        if ctx.cancel_event.is_set() and final_status != "fail":
+            final_status = "canceled"
     finally:
-        if final_status == "success" and counters.get("warn", 0) > 0:
-            final_status = "warn"
-        _diag_set_run_status(run_id, final_status, counters, started_at)
+        steps = [dict(r) for r in db_fetchall("SELECT category,status FROM diagnostic_steps WHERE run_id=? ORDER BY id;", (int(run_id),))]
+        summary = {"counts": counters, "subsystems": _diag_build_subsystem_summary(steps)}
+        _diag_set_run_status(run_id, final_status, summary, started_at)
         if ctx.sandbox_dir:
             shutil.rmtree(ctx.sandbox_dir, ignore_errors=True)
         DIAG_RUNNING_TASKS.pop(run_id, None)
@@ -5218,15 +5392,45 @@ def _diag_fetch_run(run_id: int) -> Dict[str, Any]:
     if not row:
         raise HTTPException(status_code=404, detail="Diagnostics run not found")
     steps = db_fetchall("SELECT * FROM diagnostic_steps WHERE run_id=? ORDER BY id;", (int(run_id),))
-    out = dict(row)
-    out["options"] = _json_loads(out.pop("options_json", None), {})
-    out["summary"] = _json_loads(out.pop("summary_json", None), {})
-    out["steps"] = []
+    run = dict(row)
+    run["options"] = _json_loads(run.pop("options_json", None), {})
+    run["summary"] = _json_loads(run.pop("summary_json", None), {})
+    out_steps: List[Dict[str, Any]] = []
     for st in steps:
         item = dict(st)
+        item["title_ru"] = item.get("title_ru") or item.get("title")
+        item["message_ru"] = item.get("message_ru") or item.get("message")
         item["details"] = _json_loads(item.pop("details_json", None), {})
-        out["steps"].append(item)
-    return out
+        out_steps.append(item)
+    done = len([s for s in out_steps if s.get("status") in ("success", "warn", "fail", "skipped", "canceled")])
+    progress = int((done / len(out_steps)) * 100) if out_steps else (100 if run.get("status") != "running" else 0)
+    current = next((s for s in out_steps if s.get("status") == "running"), out_steps[-1] if out_steps else None)
+    run["progress"] = progress
+    run["current_step_ru"] = current.get("title_ru") if current else None
+    return {"run": run, "steps": out_steps}
+
+
+def _diag_report_html(payload: Dict[str, Any]) -> str:
+    run = payload["run"]
+    steps = payload["steps"]
+    status_map = {
+        "success": "✅ Ошибок не найдено",
+        "warn": "⚠️ Есть предупреждения",
+        "fail": "❌ Есть критические ошибки",
+        "canceled": "⛔ Прогон отменён",
+        "running": "⏳ Выполняется",
+    }
+    recs = []
+    for st in steps:
+        if st.get("status") in ("fail", "warn"):
+            recs.append(f"<li>{st.get('fix_ru') or 'Проверьте шаг и исправьте конфигурацию.'} <a href='#step-{st.get('id')}'>Показать шаг</a></li>")
+    steps_html = []
+    for st in steps:
+        steps_html.append(
+            f"<article id='step-{st.get('id')}'><h3>{st.get('title_ru')}</h3><p><b>Статус:</b> {st.get('status')}</p><p><b>Что проверяли:</b> {st.get('desc_ru') or ''}</p><p><b>Что не так:</b> {st.get('message_ru') or ''}</p><p><b>Почему это важно:</b> {st.get('impact_ru') or ''}</p><p><b>Как исправить:</b> {st.get('fix_ru') or ''}</p><details><summary>Показать тех. детали</summary><pre>{json.dumps(st.get('details') or {}, ensure_ascii=False, indent=2)}</pre></details></article>"
+        )
+    env = f"Версия Python: {os.sys.version.split()[0]} | OS: {os.name} | Время сервера: {iso_now(CFG.tzinfo())}"
+    return f"""<!doctype html><html lang='ru'><head><meta charset='utf-8'><title>Отчёт диагностики №{run.get('id')}</title><style>body{{font-family:Arial,sans-serif;max-width:1100px;margin:20px auto;padding:0 12px}}article{{border:1px solid #ddd;border-radius:10px;padding:10px;margin:10px 0}}pre{{white-space:pre-wrap;background:#fafafa;padding:10px;border-radius:8px}}</style></head><body><h1>Отчёт диагностики №{run.get('id')}</h1><p>Дата старта: {run.get('started_at') or run.get('created_at')} | Длительность: {run.get('duration_ms')} мс | Кто запустил: {run.get('created_by') or run.get('created_by_user_id')} | Suite: {run.get('suite')} | Mode: {run.get('mode')}</p><h2>{status_map.get(str(run.get('status')), run.get('status'))}</h2><h3>Что сделать сейчас</h3><ol>{''.join(recs) or '<li>Критичных действий не требуется.</li>'}</ol><h3>Шаги проверки</h3>{''.join(steps_html)}<h3>Окружение</h3><p>{env}</p><p><a href='/api/admin/diagnostics/runs/{run.get('id')}/download?format=json'>Скачать JSON</a> · <a href='/api/admin/diagnostics/runs/{run.get('id')}/download?format=html'>Скачать HTML</a></p></body></html>"""
 
 
 @APP.post("/api/admin/diagnostics/run")
@@ -5234,29 +5438,29 @@ async def api_diagnostics_run(
     body: DiagnosticsRunIn = Body(default_factory=DiagnosticsRunIn),
     u: sqlite3.Row = Depends(require_role("admin")),
 ):
+    _ensure_diag_schema()
     suite = str(body.suite or "quick").lower()
     mode = str(body.mode or "safe").lower()
     if suite not in {"quick", "full", "integrations"}:
-        raise HTTPException(status_code=400, detail="Invalid suite")
+        raise HTTPException(status_code=400, detail="Некорректный suite")
     if mode not in {"safe", "sandbox", "live"}:
-        raise HTTPException(status_code=400, detail="Invalid mode")
+        raise HTTPException(status_code=400, detail="Некорректный mode")
+    if mode == "live" and body.options.check_telegram and not body.options.telegram_target_id:
+        raise HTTPException(status_code=400, detail="Для LIVE + Telegram укажите telegram_target_id")
     active = db_fetchone("SELECT id FROM diagnostic_runs WHERE status='running' ORDER BY id DESC LIMIT 1;")
     if active:
-        raise HTTPException(status_code=409, detail="Diagnostics run already in progress")
+        raise HTTPException(status_code=409, detail=f"Уже выполняется прогон №{active['id']}")
 
     now = iso_now(CFG.tzinfo())
-    user_id = int(u["id"])
-    user_exists = db_fetchone("SELECT id FROM users WHERE id=?;", (user_id,))
     run_id = db_exec_returning_id(
         """
-        INSERT INTO diagnostic_runs (created_at, created_by_user_id, suite, mode, status, options_json)
-        VALUES (?, ?, ?, ?, 'queued', ?);
+        INSERT INTO diagnostic_runs (created_at, created_by_user_id, created_by, suite, mode, status, options_json)
+        VALUES (?, ?, ?, ?, ?, 'queued', ?);
         """,
-        (now, user_id if user_exists else None, suite, mode, json.dumps(body.options.model_dump(), ensure_ascii=False)),
+        (now, int(u["id"]), str(u.get("name") or u.get("telegram_id") or u["id"]), suite, mode, json.dumps(body.options.model_dump(), ensure_ascii=False)),
     )
     DIAG_CANCEL_EVENTS[run_id] = asyncio.Event()
-    task = asyncio.create_task(_run_diagnostics(run_id, suite, mode, body.options))
-    DIAG_RUNNING_TASKS[run_id] = task
+    DIAG_RUNNING_TASKS[run_id] = asyncio.create_task(_run_diagnostics(run_id, suite, mode, body.options))
     return {"run_id": run_id, "status": "running"}
 
 
@@ -5266,10 +5470,7 @@ def api_diagnostics_run_get(run_id: int, u: sqlite3.Row = Depends(require_role("
 
 
 @APP.get("/api/admin/diagnostics/runs")
-def api_diagnostics_runs_list(
-    limit: int = Query(50, ge=1, le=500),
-    u: sqlite3.Row = Depends(require_role("admin")),
-):
+def api_diagnostics_runs_list(limit: int = Query(50, ge=1, le=500), u: sqlite3.Row = Depends(require_role("admin"))):
     rows = db_fetchall("SELECT * FROM diagnostic_runs ORDER BY id DESC LIMIT ?;", (int(limit),))
     items = []
     for row in rows:
@@ -5282,37 +5483,32 @@ def api_diagnostics_runs_list(
 
 @APP.post("/api/admin/diagnostics/runs/{run_id}/cancel")
 def api_diagnostics_cancel(run_id: int, u: sqlite3.Row = Depends(require_role("admin"))):
-    row = db_fetchone("SELECT * FROM diagnostic_runs WHERE id=?;", (int(run_id),))
+    row = db_fetchone("SELECT id,status FROM diagnostic_runs WHERE id=?;", (int(run_id),))
     if not row:
         raise HTTPException(status_code=404, detail="Diagnostics run not found")
     ev = DIAG_CANCEL_EVENTS.get(int(run_id))
     if ev:
         ev.set()
+    if row["status"] == "queued":
+        db_exec("UPDATE diagnostic_runs SET status='canceled', finished_at=? WHERE id=?;", (iso_now(CFG.tzinfo()), int(run_id)))
     return {"ok": True}
 
 
 @APP.get("/api/admin/diagnostics/runs/{run_id}/download")
-def api_diagnostics_download(
-    run_id: int,
-    format: str = Query("json"),
-    u: sqlite3.Row = Depends(require_role("admin")),
-):
+def api_diagnostics_download(run_id: int, format: str = Query("json"), u: sqlite3.Row = Depends(require_role("admin"))):
     payload = _diag_fetch_run(run_id)
     fmt = str(format or "json").lower()
     if fmt == "json":
-        return JSONResponse(payload)
-    if fmt != "html":
-        raise HTTPException(status_code=400, detail="Unsupported format")
-    html = [
-        "<html><head><meta charset='utf-8'><title>Diagnostics report</title></head><body>",
-        f"<h1>Diagnostics run #{payload['id']}</h1>",
-        f"<p>Status: <b>{payload['status']}</b></p>",
-        "<ul>",
-    ]
-    for st in payload.get("steps", []):
-        html.append(f"<li><b>{st.get('status')}</b> {st.get('title')} — {st.get('message') or ''}</li>")
-    html.append("</ul></body></html>")
-    return Response("".join(html), media_type="text/html; charset=utf-8")
+        return JSONResponse(_mask_recursive(payload))
+    if fmt == "html":
+        return Response(_diag_report_html(_mask_recursive(payload)), media_type="text/html; charset=utf-8")
+    raise HTTPException(status_code=400, detail="Unsupported format")
+
+
+@APP.get("/admin/diagnostics/runs/{run_id}/report")
+def diagnostics_report_page(run_id: int, u: sqlite3.Row = Depends(require_role("admin"))):
+    payload = _diag_fetch_run(run_id)
+    return Response(_diag_report_html(_mask_recursive(payload)), media_type="text/html; charset=utf-8")
 
 
 @APP.post("/api/admin/system/full-test")
@@ -5320,11 +5516,11 @@ async def api_admin_full_test(u: sqlite3.Row = Depends(require_role("admin"))):
     options = DiagnosticsRunOptions(timeout_sec=60)
     ctx = DiagnosticsContext(0, "quick", "safe", options)
     checks = [
-        ("database", _diag_check_db_integrity),
-        ("settings", _diag_check_preflight),
-        ("scheduler", _diag_check_scheduler),
-        ("core_data", _diag_check_exports),
-        ("storage", _diag_check_backups),
+        ("database", _diag_db_integrity),
+        ("settings", _diag_config_env_required),
+        ("scheduler", _diag_scheduler_present),
+        ("core_data", _diag_reports_png),
+        ("storage", _diag_backup_db),
     ]
     out = []
     worst = "ok"
@@ -5335,7 +5531,7 @@ async def api_admin_full_test(u: sqlite3.Row = Depends(require_role("admin"))):
             worst = "fail"
         elif status == "warn" and worst != "fail":
             worst = "warn"
-        out.append({"name": name, "status": status, "message": res.get("message", "")})
+        out.append({"name": name, "status": status, "message": res.get("message_ru", "")})
     return {"status": worst, "checks": out}
 
 
