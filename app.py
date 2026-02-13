@@ -4938,8 +4938,15 @@ def _mask_recursive(value: Any) -> Any:
         return out
     if isinstance(value, list):
         return [_mask_recursive(v) for v in value]
-    if isinstance(value, str) and len(value) > 24 and any(ch.isdigit() for ch in value):
-        return _mask_secret(value)
+    if isinstance(value, str):
+        compact = value.strip()
+        looks_like_token = (
+            len(compact) >= 32
+            and any(ch.isdigit() for ch in compact)
+            and re.fullmatch(r"[A-Za-z0-9_\-\.]+", compact) is not None
+        )
+        if looks_like_token:
+            return _mask_secret(compact)
     return value
 
 
